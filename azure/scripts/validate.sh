@@ -1,7 +1,7 @@
 #!/bin/bash
 # =============================================================================
 # NETWORKING LAB - VALIDATION SCRIPT
-# Validates by testing actual connectivity, not resource configuration
+# Validates incident resolution by testing actual connectivity
 # =============================================================================
 
 set -e
@@ -16,38 +16,22 @@ YELLOW='\033[1;33m'
 CYAN='\033[0;36m'
 NC='\033[0m' # No Color
 
-# Counters
-PASS=0
-FAIL=0
+# Incident tracking
+declare -A INCIDENTS
+INCIDENTS["INC-4521"]="pending"
+INCIDENTS["INC-4522"]="pending"
+INCIDENTS["INC-4523"]="pending"
+INCIDENTS["INC-4524"]="pending"
 
 # Master secret for token generation (matches verification service)
 MASTER_SECRET="L2C_NETLAB_MASTER_2024"
 
 # SSH options for non-interactive use
 SSH_OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=10 -o BatchMode=yes -q"
-# Inner SSH options (simpler to avoid parsing issues)
-INNER_SSH_OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=10 -q"
 
 # =============================================================================
 # Helper Functions
 # =============================================================================
-
-print_header() {
-    echo ""
-    echo "============================================"
-    echo "$1"
-    echo "============================================"
-}
-
-check_pass() {
-    echo -e "  ${GREEN}✓${NC} $1"
-    PASS=$((PASS + 1))
-}
-
-check_fail() {
-    echo -e "  ${RED}✗${NC} $1"
-    FAIL=$((FAIL + 1))
-}
 
 get_terraform_output() {
     cd "$TERRAFORM_DIR"
@@ -59,28 +43,25 @@ run_on_vm() {
     local TARGET_IP="$1"
     local CMD="$2"
 
-    # Use simpler inner SSH options to avoid parsing issues in nested SSH
     ssh $SSH_OPTS -i "$SSH_KEY" labadmin@"$BASTION_IP" \
         "ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null labadmin@$TARGET_IP '$CMD'" 2>/dev/null | tr -d '\n\r'
 }
 
 # =============================================================================
-# Pre-flight checks
+# Pre-flight checks (silent)
 # =============================================================================
 
 preflight_check() {
-    print_header "Pre-flight Checks"
-
     # Check if terraform state exists
     if [ ! -f "${TERRAFORM_DIR}/terraform.tfstate" ]; then
-        echo -e "${RED}Error: No terraform state found. Run 'terraform apply' first.${NC}"
+        echo -e "${RED}Error: No terraform state found. Run './setup.sh' first.${NC}"
         exit 1
     fi
 
     # Check for SSH key
     if [ ! -f "$HOME/.ssh/netlab-key" ]; then
         echo -e "${RED}Error: SSH key not found at ~/.ssh/netlab-key${NC}"
-        echo "Run: terraform output -raw ssh_private_key > ~/.ssh/netlab-key && chmod 600 ~/.ssh/netlab-key"
+        echo "Run: cd ../terraform && terraform output -raw ssh_private_key > ~/.ssh/netlab-key && chmod 600 ~/.ssh/netlab-key"
         exit 1
     fi
 
@@ -91,7 +72,6 @@ preflight_check() {
     API_IP=$(get_terraform_output "api_server_private_ip")
     WEB_IP=$(get_terraform_output "web_server_private_ip")
     DB_IP=$(get_terraform_output "database_server_private_ip")
-    WEB_PUBLIC_IP=$(get_terraform_output "web_server_public_ip")
     SSH_KEY="$HOME/.ssh/netlab-key"
 
     if [ -z "$RESOURCE_GROUP" ] || [ -z "$BASTION_IP" ]; then
@@ -99,169 +79,94 @@ preflight_check() {
         exit 1
     fi
 
-    check_pass "Terraform state exists"
-    check_pass "SSH key found"
-    check_pass "Bastion IP: $BASTION_IP"
-
     # Test bastion connectivity
-    if ssh $SSH_OPTS -i "$SSH_KEY" labadmin@"$BASTION_IP" "echo ok" >/dev/null 2>&1; then
-        check_pass "Bastion SSH accessible"
-    else
-        check_fail "Cannot SSH to bastion at $BASTION_IP"
-        echo -e "${RED}Cannot continue without bastion access${NC}"
+    if ! ssh $SSH_OPTS -i "$SSH_KEY" labadmin@"$BASTION_IP" "echo ok" >/dev/null 2>&1; then
+        echo -e "${RED}Error: Cannot reach bastion host${NC}"
         exit 1
     fi
 
     # Export for other functions
-    export RESOURCE_GROUP DEPLOYMENT_ID BASTION_IP API_IP WEB_IP DB_IP WEB_PUBLIC_IP SSH_KEY
+    export RESOURCE_GROUP DEPLOYMENT_ID BASTION_IP API_IP WEB_IP DB_IP SSH_KEY
 }
 
 # =============================================================================
-# Task 1: Routing & Gateways
-# Test: Can the API server reach the internet?
+# Incident Validation
 # =============================================================================
 
-validate_task_1() {
-    print_header "Task 1: Routing & Gateways"
-    echo "  Testing: Can API server reach the internet?"
-
-    # Test outbound internet connectivity from API server
+validate_inc_4521() {
     local RESULT=$(run_on_vm "$API_IP" "curl -s --max-time 10 -o /dev/null -w '%{http_code}' https://example.com 2>/dev/null || echo 'failed'")
-
-    if [ "$RESULT" == "200" ]; then
-        check_pass "API server can reach the internet (HTTP 200 from example.com)"
-    else
-        check_fail "API server cannot reach the internet (got: $RESULT)"
-        echo "    The private subnet needs NAT Gateway for outbound internet access"
-    fi
+    [ "$RESULT" == "200" ] && INCIDENTS["INC-4521"]="resolved" || INCIDENTS["INC-4521"]="unresolved"
 }
 
-# =============================================================================
-# Task 2: DNS Resolution
-# Test: Can VMs resolve internal hostnames?
-# =============================================================================
-
-validate_task_2() {
-    print_header "Task 2: DNS Resolution"
-    echo "  Testing: Can VMs resolve internal DNS names?"
-
-    # Test DNS resolution for each hostname using Azure DNS directly (168.63.129.16)
-    # This bypasses systemd-resolved caching issues
+validate_inc_4522() {
     local WEB_RESOLVES=$(run_on_vm "$WEB_IP" "nslookup web.internal.local 168.63.129.16 2>/dev/null | grep -c 'Address.*10\.' || echo 0")
     local API_RESOLVES=$(run_on_vm "$WEB_IP" "nslookup api.internal.local 168.63.129.16 2>/dev/null | grep -c 'Address.*10\.' || echo 0")
     local DB_RESOLVES=$(run_on_vm "$WEB_IP" "nslookup db.internal.local 168.63.129.16 2>/dev/null | grep -c 'Address.*10\.' || echo 0")
-
-    if [ "$WEB_RESOLVES" -ge 1 ]; then
-        check_pass "web.internal.local resolves"
+    
+    if [ "$WEB_RESOLVES" -ge 1 ] && [ "$API_RESOLVES" -ge 1 ] && [ "$DB_RESOLVES" -ge 1 ]; then
+        INCIDENTS["INC-4522"]="resolved"
     else
-        check_fail "web.internal.local does not resolve"
-    fi
-
-    if [ "$API_RESOLVES" -ge 1 ]; then
-        check_pass "api.internal.local resolves"
-    else
-        check_fail "api.internal.local does not resolve"
-    fi
-
-    if [ "$DB_RESOLVES" -ge 1 ]; then
-        check_pass "db.internal.local resolves"
-    else
-        check_fail "db.internal.local does not resolve"
-    fi
-
-    if [ "$WEB_RESOLVES" -lt 1 ] || [ "$API_RESOLVES" -lt 1 ] || [ "$DB_RESOLVES" -lt 1 ]; then
-        echo "    Check: Is the Private DNS Zone linked to the VNet? Are A records created?"
+        INCIDENTS["INC-4522"]="unresolved"
     fi
 }
 
-# =============================================================================
-# Task 3: Ports & Protocols
-# Test: Can web reach API on 8080? Can API reach database on 5432?
-# =============================================================================
-
-validate_task_3() {
-    print_header "Task 3: Ports & Protocols"
-    echo "  Testing: Can services communicate on required ports?"
-
-    # Test web -> API on port 8080 (use exit code instead of parsing output)
+validate_inc_4523() {
     local WEB_TO_API=$(run_on_vm "$WEB_IP" "nc -zw3 $API_IP 8080 && echo 1 || echo 0")
-    WEB_TO_API=${WEB_TO_API:-0}
-
-    if [ "$WEB_TO_API" -eq 1 ] 2>/dev/null; then
-        check_pass "Web server can reach API server on port 8080"
-    else
-        check_fail "Web server cannot reach API server on port 8080"
-        echo "    Check: API server NSG rules (priority matters!)"
-    fi
-
-    # Test API -> Database on port 5432
     local API_TO_DB=$(run_on_vm "$API_IP" "nc -zw3 $DB_IP 5432 && echo 1 || echo 0")
+    WEB_TO_API=${WEB_TO_API:-0}
     API_TO_DB=${API_TO_DB:-0}
-
-    if [ "$API_TO_DB" -ge 1 ] 2>/dev/null; then
-        check_pass "API server can reach database on port 5432"
+    
+    if [ "$WEB_TO_API" -eq 1 ] 2>/dev/null && [ "$API_TO_DB" -eq 1 ] 2>/dev/null; then
+        INCIDENTS["INC-4523"]="resolved"
     else
-        check_fail "API server cannot reach database on port 5432"
-        echo "    Check: Database NSG rule - is it Allow or Deny?"
+        INCIDENTS["INC-4523"]="unresolved"
     fi
 }
 
-# =============================================================================
-# Task 4: Security Hardening
-# Test: SSH restricted? Database access restricted?
-# =============================================================================
-
-validate_task_4() {
-    print_header "Task 4: Security Hardening"
-    echo "  Testing: Are security restrictions in place?"
-
-    # Test 1: Direct SSH to web server should be blocked (not from bastion subnet)
-    # We test by checking NSG rules since we can't easily test from outside
+validate_inc_4524() {
+    local ALL_PASS=true
+    
+    # Check 1: SSH source restriction
     local WEB_NSG="nsg-web-${DEPLOYMENT_ID}"
     local SSH_SOURCE=$(az network nsg rule show -g "$RESOURCE_GROUP" \
         --nsg-name "$WEB_NSG" -n allow-ssh \
         --query "sourceAddressPrefix" -o tsv 2>/dev/null || echo "*")
-
-    if [ "$SSH_SOURCE" != "*" ] && [ "$SSH_SOURCE" != "0.0.0.0/0" ] && [ "$SSH_SOURCE" != "Internet" ]; then
-        check_pass "Web server SSH restricted (source: $SSH_SOURCE)"
-    else
-        check_fail "Web server SSH open to internet (source: $SSH_SOURCE)"
-        echo "    Should be restricted to bastion subnet (10.0.1.0/24)"
+    
+    if [ "$SSH_SOURCE" == "*" ] || [ "$SSH_SOURCE" == "0.0.0.0/0" ] || [ "$SSH_SOURCE" == "Internet" ]; then
+        ALL_PASS=false
     fi
-
-    # Test 2: Database should only accept connections from API subnet
+    
+    # Check 2: Database source restriction
     local DB_NSG="nsg-database-${DEPLOYMENT_ID}"
     local PG_SOURCE=$(az network nsg rule show -g "$RESOURCE_GROUP" \
         --nsg-name "$DB_NSG" -n postgres-access \
         --query "sourceAddressPrefix" -o tsv 2>/dev/null || echo "")
-
-    if [ "$PG_SOURCE" == "10.0.2.0/24" ]; then
-        check_pass "Database access restricted to API subnet only"
-    elif [ "$PG_SOURCE" == "10.0.0.0/16" ]; then
-        check_fail "Database open to entire VNet (should be API subnet 10.0.2.0/24 only)"
-    else
-        check_fail "Database access not properly restricted (source: $PG_SOURCE)"
+    
+    if [ "$PG_SOURCE" != "10.0.2.0/24" ]; then
+        ALL_PASS=false
     fi
-
-    # Test 3: Bastion should NOT be able to reach database (it's not in API subnet)
+    
+    # Check 3: Bastion to DB blocked
     local BASTION_TO_DB=$(ssh $SSH_OPTS -i "$SSH_KEY" labadmin@"$BASTION_IP" \
         "nc -zv $DB_IP 5432 -w 3 2>&1 | grep -c 'succeeded\|open' || echo 0" 2>/dev/null | tr -d '\n\r')
-
-    if [ "$BASTION_TO_DB" -eq 0 ] 2>/dev/null; then
-        check_pass "Bastion cannot reach database (correct - least privilege)"
-    else
-        check_fail "Bastion can reach database (should be blocked - not in API subnet)"
+    
+    if [ "$BASTION_TO_DB" -ne 0 ] 2>/dev/null; then
+        ALL_PASS=false
     fi
-
-    # Test 4: ICMP not open from anywhere
+    
+    # Check 4: ICMP restriction
     local ICMP_SOURCE=$(az network nsg rule show -g "$RESOURCE_GROUP" \
         --nsg-name "$WEB_NSG" -n allow-icmp \
         --query "sourceAddressPrefix" -o tsv 2>/dev/null || echo "deleted")
-
+    
     if [ "$ICMP_SOURCE" == "*" ]; then
-        check_fail "ICMP open from anywhere (should be VNet only or removed)"
+        ALL_PASS=false
+    fi
+    
+    if [ "$ALL_PASS" = true ]; then
+        INCIDENTS["INC-4524"]="resolved"
     else
-        check_pass "ICMP properly restricted (source: $ICMP_SOURCE)"
+        INCIDENTS["INC-4524"]="unresolved"
     fi
 }
 
@@ -310,28 +215,39 @@ EOF
 }
 
 # =============================================================================
-# Completion and Token Export
+# Display Results
 # =============================================================================
 
-generate_token() {
-    print_header "Completion Status"
-
-    local TOTAL=$((PASS + FAIL))
+show_status() {
     echo ""
-    echo "  Passed: $PASS / $TOTAL"
-    echo "  Failed: $FAIL"
+    echo "============================================"
+    echo "Incident Status"
+    echo "============================================"
+    
+    local RESOLVED=0
+    local TOTAL=4
+    
+    for INC in "INC-4521" "INC-4522" "INC-4523" "INC-4524"; do
+        if [ "${INCIDENTS[$INC]}" == "resolved" ]; then
+            echo -e "  ${GREEN}✓${NC} $INC"
+            RESOLVED=$((RESOLVED + 1))
+        else
+            echo -e "  ${RED}✗${NC} $INC"
+        fi
+    done
+    
     echo ""
-
-    if [ $FAIL -eq 0 ]; then
+    echo "  Resolved: $RESOLVED / $TOTAL"
+    echo ""
+    
+    if [ $RESOLVED -eq $TOTAL ]; then
         echo -e "${GREEN}============================================${NC}"
-        echo -e "${GREEN}   ALL TASKS COMPLETED! ${NC}"
+        echo -e "${GREEN}   ALL INCIDENTS RESOLVED ${NC}"
         echo -e "${GREEN}============================================${NC}"
         echo ""
-        echo -e "  Run ${CYAN}../scripts/validate.sh export${NC} to generate"
-        echo "  your verifiable completion token."
+        echo -e "  Run ${CYAN}./validate.sh export${NC} to generate"
+        echo "  your completion token."
         echo ""
-    else
-        echo -e "${YELLOW}Keep going! Fix the failing checks and run validation again.${NC}"
     fi
 }
 
@@ -339,17 +255,20 @@ export_token() {
     # Run validation first (silently check)
     preflight_check > /dev/null 2>&1
 
-    # Run all validations and count
-    PASS=0
-    FAIL=0
+    # Run all validations
+    validate_inc_4521 > /dev/null 2>&1
+    validate_inc_4522 > /dev/null 2>&1
+    validate_inc_4523 > /dev/null 2>&1
+    validate_inc_4524 > /dev/null 2>&1
 
-    validate_task_1 > /dev/null 2>&1
-    validate_task_2 > /dev/null 2>&1
-    validate_task_3 > /dev/null 2>&1
-    validate_task_4 > /dev/null 2>&1
+    # Check if all resolved
+    local RESOLVED=0
+    for INC in "INC-4521" "INC-4522" "INC-4523" "INC-4524"; do
+        [ "${INCIDENTS[$INC]}" == "resolved" ] && RESOLVED=$((RESOLVED + 1))
+    done
 
-    if [ $FAIL -ne 0 ]; then
-        echo -e "${RED}Error: Not all tasks are completed. Run './validate.sh all' to see status.${NC}"
+    if [ $RESOLVED -ne 4 ]; then
+        echo -e "${RED}Error: Not all incidents resolved. Run './validate.sh' to see status.${NC}"
         exit 1
     fi
 
@@ -448,48 +367,27 @@ usage() {
     echo "Usage: $0 [command]"
     echo ""
     echo "Commands:"
-    echo "  task-1    Validate Task 1: Routing & Gateways"
-    echo "  task-2    Validate Task 2: DNS Resolution"
-    echo "  task-3    Validate Task 3: Ports & Protocols"
-    echo "  task-4    Validate Task 4: Security Hardening"
-    echo "  all       Validate all tasks (default)"
-    echo "  export    Generate completion token (after all tasks pass)"
-    echo "  verify    Verify a completion token"
+    echo "  (default)   Check incident status"
+    echo "  export      Generate completion token (after all incidents resolved)"
+    echo "  verify      Verify a completion token"
     echo ""
     echo "Examples:"
-    echo "  $0 task-1           # Validate Task 1 only"
-    echo "  $0 all              # Validate all tasks"
-    echo "  $0 export           # Generate completion token"
-    echo "  $0 verify <token>   # Verify a token"
+    echo "  $0              # Check incident status"
+    echo "  $0 export       # Generate completion token"
+    echo "  $0 verify <token>"
 }
 
 main() {
-    local TARGET="${1:-all}"
+    local TARGET="${1:-status}"
 
     case "$TARGET" in
-        task-1)
+        status|all)
             preflight_check
-            validate_task_1
-            ;;
-        task-2)
-            preflight_check
-            validate_task_2
-            ;;
-        task-3)
-            preflight_check
-            validate_task_3
-            ;;
-        task-4)
-            preflight_check
-            validate_task_4
-            ;;
-        all)
-            preflight_check
-            validate_task_1
-            validate_task_2
-            validate_task_3
-            validate_task_4
-            generate_token
+            validate_inc_4521
+            validate_inc_4522
+            validate_inc_4523
+            validate_inc_4524
+            show_status
             ;;
         export)
             export_token

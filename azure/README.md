@@ -1,126 +1,153 @@
 # Azure Networking Lab
 
-Deliberately broken Azure network infrastructure. Deploy, troubleshoot, and validate four tasks.
+A realistic network troubleshooting exercise. You're the on-call engineer—diagnose and fix.
 
 ```
-┌────────────────────────────────────────────────────────────────┐
-│                    VNet (10.0.0.0/16)                          │
+┌───────────────────────────────────────────────────────────────┐
+│                    VNet (10.0.0.0/16)                         │
 │  ┌────────────────┐  ┌────────────────┐  ┌────────────────┐   │
 │  │ Public Subnet  │  │ Private Subnet │  │    Database    │   │
-│  │  10.0.1.0/24   │──│  10.0.2.0/24   │──│    Subnet      │   │
+│  │  10.0.1.0/24   │  │  10.0.2.0/24   │  │    Subnet      │   │
 │  │   - Bastion    │  │   - Web App    │  │  10.0.3.0/24   │   │
-│  │   - NAT GW     │  │   - API Server │  │                │   │
+│  │   - NAT GW     │  │   - API Server │  │   - Database   │   │
 │  └────────────────┘  └────────────────┘  └────────────────┘   │
-└────────────────────────────────────────────────────────────────┘
+└───────────────────────────────────────────────────────────────┘
 ```
 
-## Repo Layout
+## Contents
 
-- `scripts/`
-  - `setup.sh` – deploy broken lab via Terraform
-  - `validate.sh` – connectivity-based validation + token export
-  - `destroy.sh` – teardown and cleanup
-- `terraform/`
-  - `main.tf`, `variables.tf`, `outputs.tf`
-  - `modules/`
-    - `network/` – VNets, subnets, NSGs, routes, NAT
-    - `dns/` – Private DNS zone, records, links
-    - `compute/` – Bastion, web, API, database VMs (cloud-init templates)
-  - `broken-state/` – known-bad configs for learning
+- [Getting Started](#getting-started)
+- [Incident Queue](#incident-queue)
+- [Verify Your Fixes](#verify-your-fixes)
+- [Reference](#reference)
+- [Repo Layout](#repo-layout)
+- [Clean Up](#clean-up)
 
-## Prerequisites
+---
 
-- Azure CLI logged in (`az login`)
-- Terraform
-- `jq`, `bash`, `ssh`
-- Permissions to create network + compute resources
+## Getting Started
 
-## Setup
+1. Navigate to the scripts directory:
+   ```bash
+   cd azure/scripts
+   ```
 
-```bash
-cd azure/scripts
-./setup.sh
-```
+2. Make scripts executable:
+   ```bash
+   chmod +x *.sh
+   ```
 
-Manual (optional):
-```bash
-cd azure/terraform
-terraform init && terraform apply
-terraform output -raw ssh_private_key > ~/.ssh/netlab-key && chmod 600 ~/.ssh/netlab-key
-```
+3. Run the setup script:
+   ```bash
+   ./setup.sh
+   ```
 
-Set envs (used by validation & Azure CLI commands):
-```bash
-cd azure/terraform
-export RESOURCE_GROUP=$(terraform output -raw resource_group_name)
-export DEPLOYMENT_ID=$(terraform output -raw deployment_id)
-export VNET_NAME="vnet-networking-lab-${DEPLOYMENT_ID}"
-```
+The setup script will display SSH connection instructions when complete.
 
-## Validation
+**Cost**: ~$0.50-1.00/session. Destroy when done.
 
-```bash
-cd azure/scripts
-./validate.sh [task-1|task-2|task-3|task-4|all|export|verify]
-```
+---
 
-- `task-1` Routing/NAT: API can `curl -I https://example.com`
-- `task-2` DNS: `nslookup api.internal.local 168.63.129.16` returns 10.x.x.x
-- `task-3` Ports: `nc -zw3 $API_IP 8080` and `nc -zw3 $DB_IP 5432` => `1`
-- `task-4` Security: SSH restricted; DB only from API subnet; bastion→DB blocked; ICMP restricted
-- `export`: generate completion token
-- `verify <token>`: verify token
+## Incident Queue
 
-## Tasks (Detailed)
+You're on call. Four tickets just came in. Your job: diagnose and fix.
 
-### Task 1: Routing & Gateways
-- **Problem**: API server lacks internet egress.
-- **Check**: NAT Gateway exists but not attached to private subnet.
-- **Commands**: `az network nat gateway list`, `az network vnet subnet show -g $RESOURCE_GROUP --vnet-name $VNET_NAME -n <subnet>`
-- **Fix**: Associate NAT Gateway to private subnet.
+### 🎫 INC-4521: API service can't pull external data
 
-### Task 2: DNS Resolution
-- **Problem**: `*.internal.local` does not resolve.
-- **Check**: Private DNS zone exists; ensure VNet link + A records for web/api/db.
-- **Commands**: `az network private-dns zone list`, `... link vnet list`, `... record-set a list`
-- **Fix**: Link zone to VNet; add A records pointing to 10.x.x.x addresses.
+**Priority:** High  
+**Reported by:** Backend Team  
+**Time:** 09:47 AM
 
-### Task 3: Ports & Protocols
-- **Problem**: Web→API (8080) and API→DB (5432) blocked.
-- **Check**: NSG rules and priorities on `nsg-api-${DEPLOYMENT_ID}` and `nsg-database-${DEPLOYMENT_ID}`.
-- **Commands**: `az network nsg rule list --nsg-name nsg-api-${DEPLOYMENT_ID}`; same for database.
-- **Fix**: Ensure allow rules exist with lower priority than denies; correct access type.
+> "Our API service that runs on the private subnet stopped being able to fetch data from external APIs this morning. We didn't change anything on our end. Requests to third-party services just hang and timeout. Internal calls between our services still work fine."
 
-### Task 4: Security Hardening
-- **Problem**: Overly permissive traffic.
-- **Checks/Fixes**:
-  - SSH to web/API limited to bastion subnet `10.0.1.0/24` (rule `allow-ssh`).
-  - DB access only from API subnet `10.0.2.0/24` (rule `postgres-access`). Add explicit deny for others (default AllowVnetInBound is broad).
-  - Bastion must NOT reach DB (validate via `nc` from bastion).
-  - ICMP not open to internet; restrict/remove `allow-icmp`.
+**Affected system:** API server (private subnet)
 
-## Troubleshooting
+---
 
-- **DNS caching**: query Azure DNS directly: `nslookup host 168.63.129.16`
-- **Nested SSH**: keep inner SSH options simple; see `validate.sh`
-- **Netcat listener**: `nohup nc -lk 5432 &` on DB VM to test connectivity
-- **Strip newlines**: `... | tr -d '\n\r'` for validation comparisons
+### 🎫 INC-4522: Service discovery broken
 
-## Cleanup
+**Priority:** High  
+**Reported by:** Platform Team  
+**Time:** 10:15 AM
 
-```bash
-cd azure/scripts
-./destroy.sh
-```
+> "Our applications can't resolve internal hostnames anymore. We've been using `web.internal.local`, `api.internal.local`, and `db.internal.local` for service discovery but they stopped resolving. Public DNS works fine - we can resolve google.com. This is blocking deployments."
 
-(or `terraform destroy` and `rm ~/.ssh/netlab-key`)
+**Affected system:** All VMs
 
-## Completion
+---
 
-```bash
-cd azure/scripts
-./validate.sh export
-```
-Submit token at https://learntocloud.guide/verify using your learntocloud.guide GitHub username.
+### 🎫 INC-4523: Web frontend can't reach backend
 
-**Cost**: ~$0.50-1.00/session. Remember to destroy when done.
+**Priority:** Critical  
+**Reported by:** Web Team  
+**Time:** 10:32 AM
+
+> "The web frontend suddenly can't connect to the API backend. We're getting connection refused errors on port 8080. The API health endpoint works when we curl localhost on the API server itself, so the service is running. Also, the API team says they can't reach the database on port 5432."
+
+**Affected systems:** Web server → API server, API server → Database
+
+---
+
+### 🎫 INC-4524: Security audit findings
+
+**Priority:** Medium  
+**Reported by:** Security Team  
+**Time:** 11:00 AM
+
+> "Our quarterly security scan flagged several issues with the network segmentation:
+> 
+> 1. SSH is accessible from the internet on some hosts (should only be via bastion)
+> 2. Database accepts connections from too broad a range (should be API tier only)  
+> 3. ICMP is open from anywhere
+> 
+> These need to be tightened up before our compliance review next week."
+
+**Affected systems:** Network security groups
+
+---
+
+## Verify Your Fixes
+
+The validation script tests actual connectivity—not just configuration. It SSHs into the VMs and runs the same checks a user would to confirm services are reachable.
+
+**When to use it:**
+- After fixing an incident to confirm it's resolved
+- When you think you're done with all incidents
+- To generate a completion token for submission
+
+**Check incident status:**
+
+1. Navigate to the scripts directory:
+   ```bash
+   cd azure/scripts
+   ```
+
+2. Run validation:
+   ```bash
+   ./validate.sh
+   ```
+
+**Generate completion token:**
+
+1. Run export:
+   ```bash
+   ./validate.sh export
+   ```
+
+2. Enter your GitHub username when prompted
+
+3. Store your token from the output for submission, we are working on the verification system and will provide submission instructions soon.
+
+## Clean Up
+
+When finished, destroy resources to avoid charges:
+
+1. Navigate to the scripts directory:
+   ```bash
+   cd azure/scripts
+   ```
+
+2. Run the destroy script:
+   ```bash
+   ./destroy.sh
+   ```

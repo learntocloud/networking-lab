@@ -97,10 +97,6 @@ echo ""
 echo -e "${GREEN}============================================${NC}"
 echo -e "${GREEN}   DEPLOYMENT COMPLETE!${NC}"
 echo -e "${GREEN}============================================${NC}"
-echo ""
-
-# Show connection info
-terraform output connection_instructions
 
 # Save SSH key
 echo ""

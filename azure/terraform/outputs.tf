@@ -47,7 +47,8 @@ output "connection_instructions" {
     NETWORKING LAB - CONNECTION INFO
     ============================================
 
-    1. Save the SSH key:
+    1. Save the SSH key (run from azure/terraform directory):
+       cd azure/terraform
        terraform output -raw ssh_private_key > ~/.ssh/netlab-key
        chmod 600 ~/.ssh/netlab-key
 
