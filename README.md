@@ -19,19 +19,11 @@ Fix deliberately broken cloud network infrastructure. Learn by troubleshooting r
 
 ## How It Works
 
-1. Deploy a broken infrastructure with intentional misconfigurations
-2. Receive incident tickets describing symptoms (not root causes)
-3. SSH into VMs and diagnose using standard networking tools
-4. Fix issues via CLI
-5. Validate fixes and export a completion token
-
-## Completion
-
-After resolving all incidents, generate a token containing your GitHub username:
-
-```bash
-./validate.sh export
-```
+- Infrastructure deploys with intentional misconfigurations
+- Incident tickets describe symptoms — you find the fix
+- Diagnose issues by SSHing into VMs through a bastion host
+- Fix issues from your local machine using cloud provider CLI (az, aws, gcloud)
+- Validate fixes from your local machine — the script tests connectivity via SSH
 
 ## Cost
 

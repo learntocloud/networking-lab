@@ -1,70 +1,139 @@
 ---
 name: validate-networking-lab
-description: Validates the networking lab infrastructure by testing actual connectivity through SSH. Runs connectivity tests for NAT gateway, DNS resolution, NSG rules, and security hardening.
+description: Validates the networking lab by going through the actual student journey - SSHing through bastion, running real connectivity tests, fixing issues with cloud CLI, and verifying each incident is resolved. Supports Azure, AWS, and GCP.
 ---
 
 # Validate Networking Lab
 
-Test the networking lab infrastructure by SSHing through the bastion and running connectivity checks.
+Test the lab like a student would: diagnose via SSH, fix with cloud CLI, verify.
 
 ## Prerequisites
 
-- Terraform deployed in `azure/terraform/`
-- SSH key saved at `~/.ssh/netlab-key`
-- Environment variables set: `RESOURCE_GROUP`, `DEPLOYMENT_ID`, `VNET_NAME`
+- SSH key will be auto-generated at `~/.ssh/netlab-key`
+- Cloud CLI logged in (az/aws/gcloud)
 
-## Workflow
+## Run Validation
 
-1. **Get Terraform outputs** for IP addresses:
-   ```bash
-   cd azure/terraform
-   BASTION_IP=$(terraform output -raw bastion_public_ip)
-   API_IP=$(terraform output -raw api_server_private_ip)
-   WEB_IP=$(terraform output -raw web_server_private_ip)
-   DB_IP=$(terraform output -raw database_server_private_ip)
-   ```
+The validation script will automatically deploy, test, and destroy the lab.
 
-2. **Test Task 1 (NAT Gateway)** - API server internet access:
-   ```bash
-   ssh -i ~/.ssh/netlab-key labadmin@$BASTION_IP \
-     "ssh labadmin@$API_IP 'curl -s --max-time 10 -o /dev/null -w \"%{http_code}\" https://example.com'"
-   ```
-   Expected: `200`
-
-3. **Test Task 2 (DNS)** - Internal hostname resolution:
-   ```bash
-   ssh -i ~/.ssh/netlab-key labadmin@$BASTION_IP \
-     "ssh labadmin@$WEB_IP 'nslookup api.internal.local 168.63.129.16'"
-   ```
-   Expected: Returns 10.x.x.x address
-
-4. **Test Task 3 (Ports)** - Service connectivity:
-   ```bash
-   # Web -> API on 8080
-   ssh -i ~/.ssh/netlab-key labadmin@$BASTION_IP \
-     "ssh labadmin@$WEB_IP 'nc -zw3 $API_IP 8080 && echo 1 || echo 0'"
-
-   # API -> DB on 5432
-   ssh -i ~/.ssh/netlab-key labadmin@$BASTION_IP \
-     "ssh labadmin@$API_IP 'nc -zw3 $DB_IP 5432 && echo 1 || echo 0'"
-   ```
-   Expected: `1` for both
-
-5. **Test Task 4 (Security)** - Bastion should NOT reach database:
-   ```bash
-   ssh -i ~/.ssh/netlab-key labadmin@$BASTION_IP \
-     "nc -zw3 $DB_IP 5432 && echo 1 || echo 0"
-   ```
-   Expected: `0` (blocked)
-
-## Run Full Validation
+### Azure
 
 ```bash
-cd azure/terraform && ../scripts/validate.sh all
+cd /home/gps/Developer/networking-lab/.github/skills/validate-networking-lab/azure/scripts
+chmod +x *.sh
+./run-full-validation.sh
 ```
 
-## Common Issues
+Options:
+- `--skip-deploy`: Skip deployment (use existing infrastructure)
 
-- **DNS caching**: Use `168.63.129.16` directly to bypass systemd-resolved
-- **Nested SSH parsing**: Keep inner SSH options simple, avoid complex quoting
-- **Integer comparison errors**: Strip newlines with `tr -d '\n\r'`
+### AWS (Coming Soon)
+
+```bash
+cd /home/gps/Developer/networking-lab/.github/skills/validate-networking-lab/aws/scripts
+chmod +x *.sh
+./run-full-validation.sh
+```
+
+### GCP (Coming Soon)
+
+```bash
+cd /home/gps/Developer/networking-lab/.github/skills/validate-networking-lab/gcp/scripts
+chmod +x *.sh
+./run-full-validation.sh
+```
+
+## What It Does
+
+1. **Deploy Infrastructure** - Runs terraform apply to create the broken lab environment
+2. **Initial Diagnosis** - SSHs through bastion, tests all 4 incidents (should all fail initially)
+3. **Fix INC-4521** - Applies NAT gateway fix + verifies with validate.sh
+4. **Fix INC-4522** - Applies DNS fix + verifies with validate.sh
+5. **Fix INC-4523** - Applies NSG ports fix + verifies with validate.sh
+6. **Fix INC-4524** - Applies security hardening fix + verifies with validate.sh
+7. **Final Validation** - Confirms all 4 incidents resolved
+8. **Token Test** - Verifies token generation and tamper detection
+9. **Cleanup** - Destroys ALL resources by deleting the resource group (mandatory)
+
+## Expected Output
+
+```
+╔══════════════════════════════════════════════════════════════╗
+║                    VALIDATION SUMMARY                        ║
+╚══════════════════════════════════════════════════════════════╝
+
+┌────────────────────────────────────┬──────────┐
+│ Step                               │ Result   │
+├────────────────────────────────────┼──────────┤
+│ Deploy Infrastructure              │ ✓ PASS   │
+│ Initial Diagnosis                  │ ✓ PASS   │
+│ Fix INC-4521 (NAT Gateway)         │ ✓ PASS   │
+│ Fix INC-4522 (DNS)                 │ ✓ PASS   │
+│ Fix INC-4523 (NSG Ports)           │ ✓ PASS   │
+│ Fix INC-4524 (Security)            │ ✓ PASS   │
+│ Final Validation                   │ ✓ PASS   │
+│ Token Generation Test              │ ✓ PASS   │
+└────────────────────────────────────┴──────────┘
+
+══════════════════════════════════════════════════════════════
+  ALL TESTS PASSED (8/8)
+  Lab validation complete - ready for student use
+══════════════════════════════════════════════════════════════
+```
+
+Exit code 0 = all passed, exit code 1 = something failed.
+
+## Incidents Overview
+
+| Incident | Concept | Azure | AWS | GCP |
+|----------|---------|-------|-----|-----|
+| INC-4521 | NAT/Internet Egress | NAT Gateway + Subnet | NAT Gateway + Route Table | Cloud NAT + Router |
+| INC-4522 | Private DNS | Private DNS Zone + VNet Link | Route 53 Private Zone + VPC Association | Cloud DNS Private Zone |
+| INC-4523 | Firewall Rules | NSG Rules | Security Groups | Firewall Rules |
+| INC-4524 | Security Hardening | NSG Source Restrictions | SG Source Restrictions | Firewall Source Restrictions |
+
+## Important: Complete Resource Cleanup
+
+**All resources must be destroyed after completing the lab to avoid ongoing costs.**
+
+The validation script automatically destroys all resources by deleting the entire resource group. This ensures complete cleanup regardless of how fixes were applied (Terraform, CLI commands, Azure Portal, etc.).
+
+### Why Resource Group Deletion?
+
+Students may fix the lab issues using different methods than the provided scripts:
+- Direct Azure Portal changes  
+- Alternative CLI commands
+- Custom Terraform modifications
+- ARM templates or Bicep
+
+**Deleting the resource group (`az group delete`) destroys ALL contained resources**, guaranteeing no orphaned resources remain.
+
+### Manual Cleanup
+
+If you need to manually destroy the lab:
+
+```bash
+# Get the resource group name from terraform state
+cd azure/terraform
+RESOURCE_GROUP=$(terraform output -raw resource_group_name)
+
+# Delete the entire resource group (destroys EVERYTHING)
+az group delete -n "$RESOURCE_GROUP" --yes
+
+# Clean up local files
+rm -f ~/.ssh/netlab-key
+rm -f terraform.tfstate terraform.tfstate.backup
+```
+
+### Cost Warning
+
+If cleanup fails or is interrupted, verify no resources remain:
+```bash
+az group list --query "[?starts_with(name, 'rg-networking-lab')]" -o table
+```
+
+Delete any remaining groups manually to avoid unexpected charges.
+
+## Note
+
+The scripts in `<cloud>/scripts/` contain solutions and are git-ignored.

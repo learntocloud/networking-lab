@@ -26,3 +26,6 @@ Thumbs.db
 
 # Logs
 *.log
+
+# Skill solution scripts (contain answers)
+.github/skills/**/scripts/

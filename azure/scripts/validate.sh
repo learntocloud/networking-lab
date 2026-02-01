@@ -24,10 +24,11 @@ INCIDENTS["INC-4523"]="pending"
 INCIDENTS["INC-4524"]="pending"
 
 # Master secret for token generation (matches verification service)
-MASTER_SECRET="L2C_NETLAB_MASTER_2024"
+# Using same format as Linux CTF but distinct secret for networking lab
+MASTER_SECRET="L2C_CTF_MASTER_2024"
 
-# SSH options for non-interactive use
-SSH_OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=10 -o BatchMode=yes -q"
+# SSH options for non-interactive use (-n prevents stdin consumption)
+SSH_OPTS="-n -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=10 -o BatchMode=yes -q"
 
 # =============================================================================
 # Helper Functions
@@ -179,39 +180,23 @@ generate_verification_token() {
 
     # Get current timestamp
     local TIMESTAMP=$(date +%s)
-    local COMPLETION_DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+    local COMPLETION_DATE=$(date -u +"%Y-%m-%d")
+    local COMPLETION_TIME=$(date -u +"%H:%M:%S")
 
-    # Derive verification secret from master secret + instance ID
-    local VERIFICATION_SECRET=$(echo -n "${MASTER_SECRET}${DEPLOYMENT_ID}" | sha256sum | cut -d' ' -f1)
+    # Derive verification secret from master secret + instance ID (colon separator for consistency)
+    local VERIFICATION_SECRET=$(echo -n "${MASTER_SECRET}:${DEPLOYMENT_ID}" | sha256sum | cut -d' ' -f1)
 
-    # Create payload
-    local PAYLOAD=$(cat <<EOF
-{
-    "github_username": "${GITHUB_USER}",
-    "completion_date": "${COMPLETION_DATE}",
-    "timestamp": ${TIMESTAMP},
-    "challenge": "networking-lab-azure",
-    "tasks_completed": 4,
-    "instance_id": "${DEPLOYMENT_ID}",
-    "resource_group": "${RESOURCE_GROUP}"
-}
-EOF
-)
+    # Create payload as single-line JSON (matches Linux CTF format for consistency)
+    local PAYLOAD='{"github_username":"'"$GITHUB_USER"'","date":"'"$COMPLETION_DATE"'","time":"'"$COMPLETION_TIME"'","timestamp":'"$TIMESTAMP"',"challenge":"networking-lab-azure","challenges":4,"instance_id":"'"$DEPLOYMENT_ID"'"}'
 
-    # Generate HMAC-SHA256 signature
+    # Generate HMAC-SHA256 signature over the exact payload string
     local SIGNATURE=$(echo -n "$PAYLOAD" | openssl dgst -sha256 -hmac "$VERIFICATION_SECRET" | cut -d' ' -f2)
 
-    # Create final token structure
-    local TOKEN_DATA=$(cat <<EOF
-{
-    "payload": $(echo "$PAYLOAD" | jq -c .),
-    "signature": "${SIGNATURE}"
-}
-EOF
-)
+    # Create final token structure as single-line JSON
+    local TOKEN_DATA='{"payload":'"$PAYLOAD"',"signature":"'"$SIGNATURE"'"}'
 
     # Base64 encode the token
-    echo "$TOKEN_DATA" | jq -c . | base64 -w 0
+    echo -n "$TOKEN_DATA" | base64 -w 0
 }
 
 # =============================================================================
@@ -297,9 +282,9 @@ export_token() {
 
     echo -e "${GREEN}Your completion token:${NC}"
     echo ""
-    echo "============================================"
+    echo "TOKEN_START"
     echo "$TOKEN"
-    echo "============================================"
+    echo "TOKEN_END"
     echo ""
     echo "Token details:"
     echo "  GitHub User: $GITHUB_USER"
@@ -331,21 +316,21 @@ verify_token() {
         exit 1
     fi
 
-    # Extract payload and signature
-    local PAYLOAD=$(echo "$DECODED" | jq -r '.payload' 2>/dev/null)
+    # Extract payload as compact JSON (must match generation format)
+    local PAYLOAD=$(echo "$DECODED" | jq -c '.payload' 2>/dev/null)
     local PROVIDED_SIG=$(echo "$DECODED" | jq -r '.signature' 2>/dev/null)
-    local INSTANCE_ID=$(echo "$PAYLOAD" | jq -r '.instance_id' 2>/dev/null)
+    local INSTANCE_ID=$(echo "$DECODED" | jq -r '.payload.instance_id' 2>/dev/null)
 
-    if [ -z "$PAYLOAD" ] || [ -z "$PROVIDED_SIG" ] || [ -z "$INSTANCE_ID" ]; then
+    if [ -z "$PAYLOAD" ] || [ "$PAYLOAD" == "null" ] || [ -z "$PROVIDED_SIG" ] || [ -z "$INSTANCE_ID" ]; then
         echo -e "${RED}Error: Could not parse token.${NC}"
         exit 1
     fi
 
-    # Derive verification secret
-    local VERIFICATION_SECRET=$(echo -n "${MASTER_SECRET}${INSTANCE_ID}" | sha256sum | cut -d' ' -f1)
+    # Derive verification secret (colon separator must match generate_verification_token)
+    local VERIFICATION_SECRET=$(echo -n "${MASTER_SECRET}:${INSTANCE_ID}" | sha256sum | cut -d' ' -f1)
 
-    # Regenerate signature
-    local EXPECTED_SIG=$(echo -n "$PAYLOAD" | jq -c . | openssl dgst -sha256 -hmac "$VERIFICATION_SECRET" | cut -d' ' -f2)
+    # Regenerate signature over the exact payload string
+    local EXPECTED_SIG=$(echo -n "$PAYLOAD" | openssl dgst -sha256 -hmac "$VERIFICATION_SECRET" | cut -d' ' -f2)
 
     if [ "$PROVIDED_SIG" == "$EXPECTED_SIG" ]; then
         echo -e "${GREEN}✓ Token is VALID${NC}"

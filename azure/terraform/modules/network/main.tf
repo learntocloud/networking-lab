@@ -12,12 +12,6 @@ resource "azurerm_virtual_network" "main" {
   }
 }
 
-# =============================================================================
-# SUBNETS
-# BUG: Task 1 - Subnet CIDRs have issues (overlapping ranges)
-# Students need to fix the CIDR blocks in variables.tf
-# =============================================================================
-
 resource "azurerm_subnet" "public" {
   name                 = "subnet-public"
   resource_group_name  = var.resource_group_name
@@ -63,11 +57,11 @@ resource "azurerm_nat_gateway_public_ip_association" "main" {
   public_ip_address_id = azurerm_public_ip.nat.id
 }
 
-# =============================================================================
-# ROUTE TABLES
-# BUG: Task 2 - NAT Gateway association is missing for private subnet
-# Students need to fix routes.tf to associate NAT GW with private subnet
-# =============================================================================
+# Database subnet needs NAT for cloud-init to install packages
+resource "azurerm_subnet_nat_gateway_association" "database" {
+  subnet_id      = azurerm_subnet.database.id
+  nat_gateway_id = azurerm_nat_gateway.main.id
+}
 
 resource "azurerm_route_table" "public" {
   name                = "rt-public-${var.deployment_id}"
@@ -85,7 +79,7 @@ resource "azurerm_route_table" "database" {
   name                          = "rt-database-${var.deployment_id}"
   resource_group_name           = var.resource_group_name
   location                      = var.location
-  disable_bgp_route_propagation = true
+  bgp_route_propagation_enabled = false
 }
 
 # Route table associations
