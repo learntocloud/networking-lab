@@ -97,7 +97,7 @@ You're on call. Four tickets just came in. Your job: diagnose and fix.
 > "Our quarterly security scan flagged several issues with the network segmentation:
 > 
 > 1. SSH is accessible from the internet on some hosts (should only be via bastion)
-> 2. Database accepts connections from too broad a range (should be API tier only)  
+> 2. Database accepts connections from too broad a range and is accessible via Bastion (should be API tier only)
 > 3. ICMP is open from anywhere
 > 
 > These need to be tightened up before our compliance review next week."
