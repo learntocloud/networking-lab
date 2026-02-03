@@ -6,7 +6,7 @@ set -e
 apt-get update
 apt-get install -y \
     python3 \
-    python3-pip \
+    python3-flask \
     net-tools \
     dnsutils \
     traceroute \
@@ -14,9 +14,6 @@ apt-get install -y \
     curl \
     jq \
     vim
-
-# Install Flask for simple API
-pip3 install flask
 
 # Create simple API application
 mkdir -p /opt/api
