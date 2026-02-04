@@ -98,6 +98,31 @@ resource "azurerm_network_security_group" "api" {
     destination_address_prefix = "*"
   }
 
+ # INC-4521: Block outbound internet access from the API server
+  security_rule {
+    name                       = "allow-azurecloud-outbound"
+    priority                   = 150
+    direction                  = "Outbound"
+    access                     = "Allow"
+    protocol                   = "*"
+    source_port_range          = "*"
+    destination_port_range     = "*"
+    source_address_prefix      = "*"
+    destination_address_prefix = "AzureCloud"
+  }
+
+  security_rule {
+    name                       = "deny-internet-outbound"
+    priority                   = 200
+    direction                  = "Outbound"
+    access                     = "Deny"
+    protocol                   = "*"
+    source_port_range          = "*"
+    destination_port_range     = "*"
+    source_address_prefix      = "*"
+    destination_address_prefix = "Internet"
+  }
+
   # INC-4523: Port 8080 blocked - student must add allow rule
   security_rule {
     name                       = "deny-all-inbound"
@@ -126,11 +151,11 @@ resource "azurerm_network_security_group" "database" {
     name                       = "postgres-access"
     priority                   = 100
     direction                  = "Inbound"
-    access                     = "Deny"
+    access                     = "Allow"
     protocol                   = "Tcp"
     source_port_range          = "*"
     destination_port_range     = "5432"
-    source_address_prefix      = "10.0.0.0/16"
+    source_address_prefix      = "10.0.2.0/24"
     destination_address_prefix = "*"
   }
 
