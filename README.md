@@ -8,7 +8,7 @@ Fix deliberately broken cloud network infrastructure. Learn by troubleshooting r
 |----------|--------|-------|
 | Azure | ✅ Available | [azure/README.md](azure/README.md) |
 | AWS | 🚧 Coming soon | — |
-| GCP | 🚧 Coming soon | — |
+| GCP | ✅ Available | [gcp/README.md](gcp/README.md) |
 
 ## What You'll Learn
 
