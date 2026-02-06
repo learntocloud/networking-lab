@@ -16,12 +16,11 @@ YELLOW='\033[1;33m'
 CYAN='\033[0;36m'
 NC='\033[0m'
 
-# Incident tracking
-declare -A INCIDENTS
-INCIDENTS["INC-4521"]="pending"
-INCIDENTS["INC-4522"]="pending"
-INCIDENTS["INC-4523"]="pending"
-INCIDENTS["INC-4524"]="pending"
+# Incident tracking 
+INC_4521="pending"
+INC_4522="pending"
+INC_4523="pending"
+INC_4524="pending"
 
 # Master secret for token generation (matches verification service)
 MASTER_SECRET="L2C_CTF_MASTER_2024"
@@ -100,7 +99,11 @@ preflight_check() {
 
 validate_inc_4521() {
     local RESULT=$(run_on_vm "$API_IP" "curl -s --max-time 10 -o /dev/null -w '%{http_code}' https://example.com 2>/dev/null || echo 'failed'")
-    [ "$RESULT" == "200" ] && INCIDENTS["INC-4521"]="resolved" || INCIDENTS["INC-4521"]="unresolved"
+    if [ "$RESULT" == "200" ]; then
+        INC_4521="resolved"
+    else
+        INC_4521="unresolved"
+    fi
 }
 
 validate_inc_4522() {
@@ -113,9 +116,9 @@ validate_inc_4522() {
     DB_RESOLVES=${DB_RESOLVES:-0}
 
     if [ "$WEB_RESOLVES" -ge 1 ] && [ "$API_RESOLVES" -ge 1 ] && [ "$DB_RESOLVES" -ge 1 ]; then
-        INCIDENTS["INC-4522"]="resolved"
+        INC_4522="resolved"
     else
-        INCIDENTS["INC-4522"]="unresolved"
+        INC_4522="unresolved"
     fi
 }
 
@@ -126,9 +129,9 @@ validate_inc_4523() {
     API_TO_DB=${API_TO_DB:-0}
 
     if [ "$WEB_TO_API" -eq 1 ] 2>/dev/null && [ "$API_TO_DB" -eq 1 ] 2>/dev/null; then
-        INCIDENTS["INC-4523"]="resolved"
+        INC_4523="resolved"
     else
-        INCIDENTS["INC-4523"]="unresolved"
+        INC_4523="unresolved"
     fi
 }
 
@@ -160,9 +163,9 @@ validate_inc_4524() {
     fi
 
     if [ "$ALL_PASS" = true ]; then
-        INCIDENTS["INC-4524"]="resolved"
+        INC_4524="resolved"
     else
-        INCIDENTS["INC-4524"]="unresolved"
+        INC_4524="unresolved"
     fi
 }
 
@@ -201,14 +204,33 @@ show_status() {
     local RESOLVED=0
     local TOTAL=4
 
-    for INC in "INC-4521" "INC-4522" "INC-4523" "INC-4524"; do
-        if [ "${INCIDENTS[$INC]}" == "resolved" ]; then
-            echo -e "  ${GREEN}✓${NC} $INC"
-            RESOLVED=$((RESOLVED + 1))
-        else
-            echo -e "  ${RED}✗${NC} $INC"
-        fi
-    done
+    if [ "$INC_4521" == "resolved" ]; then
+        echo -e "  ${GREEN}✓${NC} INC-4521"
+        RESOLVED=$((RESOLVED + 1))
+    else
+        echo -e "  ${RED}✗${NC} INC-4521"
+    fi
+
+    if [ "$INC_4522" == "resolved" ]; then
+        echo -e "  ${GREEN}✓${NC} INC-4522"
+        RESOLVED=$((RESOLVED + 1))
+    else
+        echo -e "  ${RED}✗${NC} INC-4522"
+    fi
+
+    if [ "$INC_4523" == "resolved" ]; then
+        echo -e "  ${GREEN}✓${NC} INC-4523"
+        RESOLVED=$((RESOLVED + 1))
+    else
+        echo -e "  ${RED}✗${NC} INC-4523"
+    fi
+
+    if [ "$INC_4524" == "resolved" ]; then
+        echo -e "  ${GREEN}✓${NC} INC-4524"
+        RESOLVED=$((RESOLVED + 1))
+    else
+        echo -e "  ${RED}✗${NC} INC-4524"
+    fi
 
     echo ""
     echo "  Resolved: $RESOLVED / $TOTAL"
@@ -234,9 +256,10 @@ export_token() {
     validate_inc_4524 > /dev/null 2>&1
 
     local RESOLVED=0
-    for INC in "INC-4521" "INC-4522" "INC-4523" "INC-4524"; do
-        [ "${INCIDENTS[$INC]}" == "resolved" ] && RESOLVED=$((RESOLVED + 1))
-    done
+    [ "$INC_4521" == "resolved" ] && RESOLVED=$((RESOLVED + 1))
+    [ "$INC_4522" == "resolved" ] && RESOLVED=$((RESOLVED + 1))
+    [ "$INC_4523" == "resolved" ] && RESOLVED=$((RESOLVED + 1))
+    [ "$INC_4524" == "resolved" ] && RESOLVED=$((RESOLVED + 1))
 
     if [ $RESOLVED -ne 4 ]; then
         echo -e "${RED}Error: Not all incidents resolved. Run './validate.sh' to see status.${NC}"
