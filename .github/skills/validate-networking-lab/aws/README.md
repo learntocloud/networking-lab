@@ -1,10 +1,8 @@
 # AWS Validation Scripts
 
-🚧 **Coming Soon**
+These scripts validate the AWS version of the networking lab.
 
-These scripts will validate the AWS version of the networking lab.
-
-## Expected Scripts
+## Scripts
 
 | Script | Purpose |
 |--------|---------|
@@ -15,6 +13,7 @@ These scripts will validate the AWS version of the networking lab.
 | `fix-inc-4523.sh` | Fix Security Groups (inbound rules) |
 | `fix-inc-4524.sh` | Fix Security Hardening (source restrictions) |
 | `test-validation.sh` | Test validate.sh and token generation |
+| `run-full-validation.sh` | Deploy, fix, validate, and destroy |
 
 ## AWS Equivalents
 

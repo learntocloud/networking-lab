@@ -1,10 +1,10 @@
-# Azure Networking Lab
+# AWS Networking Lab
 
 A realistic network troubleshooting exercise. You're the on-call engineer—diagnose and fix.
 
 ```
 ┌───────────────────────────────────────────────────────────────┐
-│                    VNet (10.0.0.0/16)                         │
+│                    VPC (10.0.0.0/16)                          │
 │  ┌────────────────┐  ┌────────────────┐  ┌────────────────┐   │
 │  │ Public Subnet  │  │ Private Subnet │  │    Database    │   │
 │  │  10.0.1.0/24   │  │  10.0.2.0/24   │  │    Subnet      │   │
@@ -26,9 +26,9 @@ A realistic network troubleshooting exercise. You're the on-call engineer—diag
 
 ## Prerequisites
 
-- **Azure CLI** installed and authenticated (`az login`)
+- **AWS CLI** installed and authenticated (e.g., `aws configure`)
 - **Terraform** installed (1.4+)
-- **Azure credentials** available to Terraform/CLI (Azure CLI login or env vars)
+- **AWS credentials** available to Terraform/CLI (env vars or shared config)
 
 ---
 
@@ -36,7 +36,7 @@ A realistic network troubleshooting exercise. You're the on-call engineer—diag
 
 1. Navigate to the scripts directory:
    ```bash
-   cd azure/scripts
+   cd aws/scripts
    ```
 
 2. Make scripts executable:
@@ -104,18 +104,18 @@ You're on call. Four tickets just came in. Your job: diagnose and fix.
 > "Our quarterly security scan flagged several issues with the network segmentation:
 > 
 > 1. SSH is accessible from the internet on some hosts (should only be via bastion)
-> 2. Database accepts connections from too broad a range and is accessible via Bastion (should be API tier only)
+> 2. Database accepts connections from too broad a range (should be API tier only)
 > 3. ICMP is open from anywhere
 > 
 > These need to be tightened up before our compliance review next week."
 
-**Affected systems:** Network security groups
+**Affected systems:** Security groups / NACLs
 
 ---
 
 ## Verify Your Fixes
 
-The validation script tests actual connectivity—not just configuration. It SSHs into the VMs and runs the same checks a user would to confirm services are reachable.
+The validation script tests actual connectivity—not just configuration. It SSHs into the VMs and runs the same checks a user would to confirm services are reachable. Sometimes, you may need to wait a minute or two for changes to propogate before validating.
 
 **When to use it:**
 - After fixing an incident to confirm it's resolved
@@ -126,7 +126,7 @@ The validation script tests actual connectivity—not just configuration. It SSH
 
 1. Navigate to the scripts directory:
    ```bash
-   cd azure/scripts
+   cd aws/scripts
    ```
 
 2. Run validation:
@@ -143,7 +143,7 @@ The validation script tests actual connectivity—not just configuration. It SSH
 
 2. Enter your GitHub username when prompted
 
-3. Store your token from the output for submission, we are working on the verification system and will provide submission instructions soon.
+---
 
 ## Clean Up
 
@@ -151,7 +151,7 @@ When finished, destroy resources to avoid charges:
 
 1. Navigate to the scripts directory:
    ```bash
-   cd azure/scripts
+   cd aws/scripts
    ```
 
 2. Run the destroy script:
