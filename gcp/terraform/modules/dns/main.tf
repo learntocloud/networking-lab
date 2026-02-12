@@ -5,6 +5,7 @@ resource "google_dns_managed_zone" "internal" {
   dns_name    = "internal.local."
   description = "Private DNS zone for networking lab"
   visibility  = "private"
+  force_destroy = true
 
   private_visibility_config {
     networks {

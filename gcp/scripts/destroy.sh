@@ -30,11 +30,29 @@ if [ ! -f "${TERRAFORM_DIR}/terraform.tfstate" ]; then
 fi
 
 cd "$TERRAFORM_DIR"
-PROJECT_ID=$(terraform output -raw project_id 2>/dev/null || echo "")
-DEPLOYMENT_ID=$(terraform output -raw deployment_id 2>/dev/null || echo "")
+RAW_PROJECT_ID=$(terraform output -raw project_id 2>/dev/null || true)
+RAW_DEPLOYMENT_ID=$(terraform output -raw deployment_id 2>/dev/null || true)
+PROJECT_ID=$(printf '%s\n' "$RAW_PROJECT_ID" | awk '/^[a-z][a-z0-9-]{4,61}[a-z0-9]$/ { print; exit }')
+DEPLOYMENT_ID=$(printf '%s\n' "$RAW_DEPLOYMENT_ID" | awk '/^[0-9a-f]{8}$/ { print; exit }')
 
 if [ -z "$PROJECT_ID" ]; then
     PROJECT_ID=$(gcloud config get-value project 2>/dev/null || echo "")
+fi
+if [ -z "$PROJECT_ID" ] && [ -f "${TERRAFORM_DIR}/terraform.tfstate" ]; then
+    if command -v jq >/dev/null 2>&1; then
+        PROJECT_ID=$(jq -r '.resources[] | select(.type=="google_dns_managed_zone") | .instances[].attributes.id' "${TERRAFORM_DIR}/terraform.tfstate" 2>/dev/null | sed -n 's#projects/\([^/]*\)/managedZones/.*#\1#p' | head -n1)
+    else
+        PROJECT_ID=$(awk '
+            /"type": "google_dns_managed_zone"/ { in_zone=1; next }
+            in_zone && /"id": "projects\/[^"]+\/managedZones\/[^"]+"/ {
+                line=$0
+                sub(/.*"id": "projects\//, "", line)
+                sub(/\/managedZones\/.*/, "", line)
+                print line
+                in_zone=0
+            }
+        ' "${TERRAFORM_DIR}/terraform.tfstate" | head -n1)
+    fi
 fi
 
 echo "Project to destroy: ${PROJECT_ID:-unknown}"
@@ -59,55 +77,76 @@ if [ -n "$PROJECT_ID" ] && [ -n "$DEPLOYMENT_ID" ] && command -v gcloud >/dev/nu
 fi
 
 # Remove Cloud DNS records so the managed zone can be deleted
-if [ -n "$PROJECT_ID" ] && [ -n "$DEPLOYMENT_ID" ] && command -v gcloud >/dev/null 2>&1; then
-    ZONE_NAME="internal-local-${DEPLOYMENT_ID}"
-    if gcloud dns managed-zones describe "$ZONE_NAME" --project "$PROJECT_ID" >/dev/null 2>&1; then
-        echo "Cleaning up DNS records in zone: $ZONE_NAME"
+if [ -n "$PROJECT_ID" ] && command -v gcloud >/dev/null 2>&1; then
+    ZONE_NAMES=()
 
-        get_record() {
-            local NAME="$1"
-            gcloud dns record-sets list \
-                --zone "$ZONE_NAME" \
-                --project "$PROJECT_ID" \
-                --name "$NAME" \
-                --type A \
-                --format="value(ttl,rrdatas)"
-        }
-
-        WEB_REC=$(get_record "web.internal.local.")
-        API_REC=$(get_record "api.internal.local.")
-        DB_REC=$(get_record "db.internal.local.")
-
-        gcloud dns record-sets transaction start --zone "$ZONE_NAME" --project "$PROJECT_ID" >/dev/null 2>&1 || true
-
-        REMOVE_COUNT=0
-        if [ -n "$WEB_REC" ]; then
-            read -r WEB_TTL WEB_IP <<< "$WEB_REC"
-            gcloud dns record-sets transaction remove "$WEB_IP" \
-                --name "web.internal.local." --ttl "$WEB_TTL" --type A \
-                --zone "$ZONE_NAME" --project "$PROJECT_ID" >/dev/null 2>&1 && REMOVE_COUNT=$((REMOVE_COUNT + 1))
-        fi
-
-        if [ -n "$API_REC" ]; then
-            read -r API_TTL API_IP <<< "$API_REC"
-            gcloud dns record-sets transaction remove "$API_IP" \
-                --name "api.internal.local." --ttl "$API_TTL" --type A \
-                --zone "$ZONE_NAME" --project "$PROJECT_ID" >/dev/null 2>&1 && REMOVE_COUNT=$((REMOVE_COUNT + 1))
-        fi
-
-        if [ -n "$DB_REC" ]; then
-            read -r DB_TTL DB_IP <<< "$DB_REC"
-            gcloud dns record-sets transaction remove "$DB_IP" \
-                --name "db.internal.local." --ttl "$DB_TTL" --type A \
-                --zone "$ZONE_NAME" --project "$PROJECT_ID" >/dev/null 2>&1 && REMOVE_COUNT=$((REMOVE_COUNT + 1))
-        fi
-
-        if [ "$REMOVE_COUNT" -gt 0 ]; then
-            gcloud dns record-sets transaction execute --zone "$ZONE_NAME" --project "$PROJECT_ID" >/dev/null 2>&1 || true
+    # Prefer zones referenced by Terraform state, because outputs may be missing in partial state.
+    if [ -f "${TERRAFORM_DIR}/terraform.tfstate" ]; then
+        if command -v jq >/dev/null 2>&1; then
+            while IFS= read -r ZONE; do
+                [ -n "$ZONE" ] && ZONE_NAMES+=("$ZONE")
+            done < <(jq -r '.resources[] | select(.type=="google_dns_managed_zone") | .instances[].attributes.name' "${TERRAFORM_DIR}/terraform.tfstate" 2>/dev/null || true)
         else
-            gcloud dns record-sets transaction abort --zone "$ZONE_NAME" --project "$PROJECT_ID" >/dev/null 2>&1 || true
+            while IFS= read -r ZONE; do
+                [ -n "$ZONE" ] && ZONE_NAMES+=("$ZONE")
+            done < <(awk '
+                /"type": "google_dns_managed_zone"/ { in_zone=1; next }
+                in_zone && /"id": "projects\/[^"]+\/managedZones\/[^"]+"/ {
+                    line=$0
+                    sub(/.*managedZones\//, "", line)
+                    sub(/".*/, "", line)
+                    print line
+                    in_zone=0
+                }
+            ' "${TERRAFORM_DIR}/terraform.tfstate")
         fi
     fi
+
+    # Fallback to deployment-derived zone name if state parsing found nothing.
+    if [ "${#ZONE_NAMES[@]}" -eq 0 ] && [ -n "$DEPLOYMENT_ID" ]; then
+        ZONE_NAMES+=("internal-local-${DEPLOYMENT_ID}")
+    fi
+
+    for ZONE_NAME in "${ZONE_NAMES[@]}"; do
+        if ! gcloud dns managed-zones describe "$ZONE_NAME" --project "$PROJECT_ID" >/dev/null 2>&1; then
+            echo "Skipping DNS zone cleanup for ${ZONE_NAME}: zone not accessible in project ${PROJECT_ID}."
+            continue
+        fi
+
+        echo "Cleaning up DNS records in zone: $ZONE_NAME"
+        DNS_NAME=$(gcloud dns managed-zones describe "$ZONE_NAME" --project "$PROJECT_ID" --format="value(dnsName)" 2>/dev/null || true)
+        if [ -z "$DNS_NAME" ]; then
+            echo "Skipping DNS zone cleanup for ${ZONE_NAME}: unable to read zone metadata."
+            continue
+        fi
+
+        while read -r RECORD_NAME RECORD_TYPE; do
+            [ -z "$RECORD_NAME" ] && continue
+            # Keep required apex records; delete everything else.
+            if [ "$RECORD_NAME" = "$DNS_NAME" ] && { [ "$RECORD_TYPE" = "NS" ] || [ "$RECORD_TYPE" = "SOA" ]; }; then
+                continue
+            fi
+
+            echo "Deleting DNS record-set: ${RECORD_NAME} (${RECORD_TYPE})"
+            gcloud dns record-sets delete "$RECORD_NAME" \
+                --type "$RECORD_TYPE" \
+                --zone "$ZONE_NAME" \
+                --project "$PROJECT_ID" \
+                -q >/dev/null 2>&1 || echo "Warning: failed to delete ${RECORD_NAME} (${RECORD_TYPE})"
+        done < <(gcloud dns record-sets list \
+            --zone "$ZONE_NAME" \
+            --project "$PROJECT_ID" \
+            --format="value(name,type)" 2>/dev/null || true)
+
+        REMAINING=$(gcloud dns record-sets list \
+            --zone "$ZONE_NAME" \
+            --project "$PROJECT_ID" \
+            --format="value(name,type)" 2>/dev/null | awk -v dns_name="$DNS_NAME" '$0 != dns_name " NS" && $0 != dns_name " SOA"' || true)
+        if [ -n "$REMAINING" ]; then
+            echo "Warning: zone ${ZONE_NAME} still has non-default records:"
+            echo "$REMAINING"
+        fi
+    done
 fi
 
 # Destroy
