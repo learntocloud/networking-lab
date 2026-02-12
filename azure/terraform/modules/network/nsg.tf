@@ -98,7 +98,7 @@ resource "azurerm_network_security_group" "api" {
     destination_address_prefix = "*"
   }
 
-  # INC-4521: Block outbound internet access from the API server
+ # INC-4521: Block outbound internet access from the API server
   security_rule {
     name                       = "allow-azurecloud-outbound"
     priority                   = 150

@@ -27,13 +27,16 @@ chmod +x *.sh
 Options:
 - `--skip-deploy`: Skip deployment (use existing infrastructure)
 
-### AWS (Coming Soon)
+### AWS
 
 ```bash
 cd /home/gps/Developer/networking-lab/.github/skills/validate-networking-lab/aws/scripts
 chmod +x *.sh
 ./run-full-validation.sh
 ```
+
+Options:
+- `--skip-deploy`: Skip deployment (use existing infrastructure)
 
 ### GCP (Coming Soon)
 
