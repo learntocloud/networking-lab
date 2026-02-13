@@ -27,6 +27,7 @@ MASTER_SECRET="L2C_CTF_MASTER_2024"
 
 # SSH options for non-interactive use
 SSH_OPTS="-n -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=10 -o BatchMode=yes -q"
+ADMIN_USERNAME="labadmin"
 
 # =============================================================================
 # Helper Functions
@@ -37,13 +38,43 @@ get_terraform_output() {
     terraform output -raw "$1" 2>/dev/null || echo ""
 }
 
+base64_encode_no_wrap() {
+    if printf "test" | base64 -w 0 >/dev/null 2>&1; then
+        printf '%s' "$1" | base64 -w 0
+    else
+        printf '%s' "$1" | base64 | tr -d '\n'
+    fi
+}
+
+base64_decode_stdin() {
+    if printf "dGVzdA==" | base64 -d >/dev/null 2>&1; then
+        base64 -d
+    else
+        base64 -D
+    fi
+}
+
+sha256_hex() {
+    if command -v sha256sum >/dev/null 2>&1; then
+        printf '%s' "$1" | sha256sum | awk '{print $1}'
+    elif command -v shasum >/dev/null 2>&1; then
+        printf '%s' "$1" | shasum -a 256 | awk '{print $1}'
+    else
+        printf '%s' "$1" | openssl dgst -sha256 | awk '{print $NF}'
+    fi
+}
+
 # Run a command on a VM via SSH through bastion
 run_on_vm() {
     local TARGET_IP="$1"
     local CMD="$2"
+    local CMD_B64
 
-    ssh $SSH_OPTS -i "$SSH_KEY" labadmin@"$BASTION_IP" \
-        "ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null labadmin@$TARGET_IP '$CMD'" 2>/dev/null | tr -d '\n\r'
+    CMD_B64=$(base64_encode_no_wrap "$CMD")
+
+    ssh $SSH_OPTS -i "$SSH_KEY" "${ADMIN_USERNAME}@${BASTION_IP}" \
+        "ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null ${ADMIN_USERNAME}@${TARGET_IP} \"printf '%s' '$CMD_B64' | (base64 -d 2>/dev/null || base64 --decode 2>/dev/null) | bash\"" \
+        2>/dev/null | tr -d '\n\r'
 }
 
 # =============================================================================
@@ -70,6 +101,20 @@ preflight_check() {
         exit 1
     fi
 
+    # Check required local tools
+    local REQUIRED_CMDS=("terraform" "ssh" "jq" "openssl" "base64")
+    local cmd
+    for cmd in "${REQUIRED_CMDS[@]}"; do
+        if ! command -v "$cmd" >/dev/null 2>&1; then
+            echo -e "${RED}Error: Required command '$cmd' not found in PATH.${NC}"
+            exit 1
+        fi
+    done
+    if ! command -v sha256sum >/dev/null 2>&1 && ! command -v shasum >/dev/null 2>&1; then
+        echo -e "${RED}Error: Required command 'sha256sum' or 'shasum' not found in PATH.${NC}"
+        exit 1
+    fi
+
     # Get outputs from terraform
     PROJECT_ID=$(get_terraform_output "project_id")
     DEPLOYMENT_ID=$(get_terraform_output "deployment_id")
@@ -85,7 +130,7 @@ preflight_check() {
     fi
 
     # Test bastion connectivity
-    if ! ssh $SSH_OPTS -i "$SSH_KEY" labadmin@"$BASTION_IP" "echo ok" >/dev/null 2>&1; then
+    if ! ssh $SSH_OPTS -i "$SSH_KEY" "${ADMIN_USERNAME}@${BASTION_IP}" "echo ok" >/dev/null 2>&1; then
         echo -e "${RED}Error: Cannot reach bastion host${NC}"
         exit 1
     fi
@@ -202,7 +247,7 @@ generate_verification_token() {
 
     # Derive verification secret from master secret + instance ID
     local VERIFICATION_SECRET
-    VERIFICATION_SECRET=$(echo -n "${MASTER_SECRET}:${DEPLOYMENT_ID}" | sha256sum | cut -d' ' -f1)
+    VERIFICATION_SECRET=$(sha256_hex "${MASTER_SECRET}:${DEPLOYMENT_ID}")
 
     # Create payload as single-line JSON
     local PAYLOAD
@@ -217,7 +262,7 @@ generate_verification_token() {
     TOKEN_DATA='{"payload":'"$PAYLOAD"',"signature":"'"$SIGNATURE"'"}'
 
     # Base64 encode the token
-    echo -n "$TOKEN_DATA" | base64 -w 0
+    base64_encode_no_wrap "$TOKEN_DATA"
 }
 
 # =============================================================================
@@ -352,7 +397,7 @@ verify_token() {
 
     # Decode the token
     local DECODED
-    DECODED=$(echo "$TOKEN" | base64 -d 2>/dev/null)
+    DECODED=$(echo "$TOKEN" | base64_decode_stdin 2>/dev/null)
 
     if [ -z "$DECODED" ]; then
         echo -e "${RED}Error: Invalid token format.${NC}"
@@ -375,7 +420,7 @@ verify_token() {
 
     # Derive verification secret
     local VERIFICATION_SECRET
-    VERIFICATION_SECRET=$(echo -n "${MASTER_SECRET}:${INSTANCE_ID}" | sha256sum | cut -d' ' -f1)
+    VERIFICATION_SECRET=$(sha256_hex "${MASTER_SECRET}:${INSTANCE_ID}")
 
     # Regenerate signature over the exact payload string
     local EXPECTED_SIG

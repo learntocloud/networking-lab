@@ -64,6 +64,15 @@ if ! command -v terraform &> /dev/null; then
     echo "Install it from: https://www.terraform.io/downloads"
     exit 1
 fi
+
+# Check jq (required for parsing Terraform version)
+if ! command -v jq &> /dev/null; then
+    echo -e "${RED}Error: jq not found.${NC}"
+    echo "Install it from: https://jqlang.org/download/"
+    exit 1
+fi
+echo -e "  ${GREEN}✓${NC} jq found"
+
 TF_VERSION=$(terraform version -json | jq -r '.terraform_version')
 echo -e "  ${GREEN}✓${NC} Terraform found: v$TF_VERSION"
 

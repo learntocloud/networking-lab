@@ -8,14 +8,14 @@ resource "google_compute_network" "main" {
 }
 
 resource "google_compute_subnetwork" "public" {
-  name          = "subnet-public"
+  name          = "subnet-public-${var.deployment_id}"
   ip_cidr_range = var.public_subnet_cidr
   region        = var.region
   network       = google_compute_network.main.id
 }
 
 resource "google_compute_subnetwork" "private" {
-  name          = "subnet-private"
+  name          = "subnet-private-${var.deployment_id}"
   ip_cidr_range = var.private_subnet_cidr
   region        = var.region
   network       = google_compute_network.main.id
@@ -24,7 +24,7 @@ resource "google_compute_subnetwork" "private" {
 }
 
 resource "google_compute_subnetwork" "database" {
-  name          = "subnet-database"
+  name          = "subnet-database-${var.deployment_id}"
   ip_cidr_range = var.database_subnet_cidr
   region        = var.region
   network       = google_compute_network.main.id
