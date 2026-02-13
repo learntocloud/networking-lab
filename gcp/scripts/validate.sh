@@ -110,8 +110,11 @@ preflight_check() {
             exit 1
         fi
     done
-    if ! command -v sha256sum >/dev/null 2>&1 && ! command -v shasum >/dev/null 2>&1; then
-        echo -e "${RED}Error: Required command 'sha256sum' or 'shasum' not found in PATH.${NC}"
+    # Ensure at least one SHA-256 implementation is available
+    if ! command -v sha256sum >/dev/null 2>&1 && \
+       ! command -v shasum >/dev/null 2>&1 && \
+       ! command -v openssl >/dev/null 2>&1; then
+        echo -e "${RED}Error: Required command for SHA-256 ('sha256sum', 'shasum', or 'openssl') not found in PATH.${NC}"
         exit 1
     fi
 
