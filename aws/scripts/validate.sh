@@ -138,28 +138,66 @@ validate_inc_4523() {
 validate_inc_4524() {
     local ALL_PASS=true
 
-    # Check 1: SSH source restriction (no 0.0.0.0/0)
-    local SSH_WORLD=$(aws ec2 describe-security-groups --group-ids "$BASTION_SG_ID" "$WEB_SG_ID" "$API_SG_ID" "$DB_SG_ID" \
-        --query "SecurityGroups[].IpPermissions[?FromPort==\`22\` && ToPort==\`22\`].IpRanges[].CidrIp" --output text 2>/dev/null | grep -c '0.0.0.0/0' || echo 0)
+    # Check 1: SSH source restriction (SG-scoped only; no CIDR)
+    for SG_ID in "$WEB_SG_ID" "$API_SG_ID" "$DB_SG_ID"; do
+        local SSH_CIDRS=$(aws ec2 describe-security-groups --group-ids "$SG_ID" \
+            --query "SecurityGroups[0].IpPermissions[?FromPort==\`22\` && ToPort==\`22\`].IpRanges[].CidrIp" --output text 2>/dev/null)
+        local SSH_SG_SOURCES=$(aws ec2 describe-security-groups --group-ids "$SG_ID" \
+            --query "SecurityGroups[0].IpPermissions[?FromPort==\`22\` && ToPort==\`22\`].UserIdGroupPairs[].GroupId" --output text 2>/dev/null)
 
-    if [ "$SSH_WORLD" -ne 0 ] 2>/dev/null; then
+        if [ -n "$SSH_CIDRS" ] || [ -z "$SSH_SG_SOURCES" ]; then
+            ALL_PASS=false
+        fi
+
+        if [ -n "$SSH_SG_SOURCES" ]; then
+            for SRC_SG in $SSH_SG_SOURCES; do
+                if [ "$SRC_SG" != "$BASTION_SG_ID" ]; then
+                    ALL_PASS=false
+                fi
+            done
+        fi
+    done
+
+    # Check 2: Database source restriction (API SG only, TCP/5432 only, SG-scoped)
+    local DB_CIDRS=$(aws ec2 describe-security-groups --group-ids "$DB_SG_ID" \
+        --query "SecurityGroups[0].IpPermissions[?IpProtocol=='tcp' && FromPort==\`5432\` && ToPort==\`5432\`].IpRanges[].CidrIp" --output text 2>/dev/null)
+    local DB_SG_SOURCES=$(aws ec2 describe-security-groups --group-ids "$DB_SG_ID" \
+        --query "SecurityGroups[0].IpPermissions[?IpProtocol=='tcp' && FromPort==\`5432\` && ToPort==\`5432\`].UserIdGroupPairs[].GroupId" --output text 2>/dev/null)
+    local DB_WIDE_RULES=$(aws ec2 describe-security-groups --group-ids "$DB_SG_ID" \
+        --query "SecurityGroups[0].IpPermissions[?IpProtocol=='tcp' && FromPort<=\`5432\` && ToPort>=\`5432\` && (FromPort!=\`5432\` || ToPort!=\`5432\`)]" --output text 2>/dev/null)
+
+    if [ -n "$DB_WIDE_RULES" ]; then
         ALL_PASS=false
     fi
 
-    # Check 2: Database source restriction (should be 10.0.2.0/24)
-    local DB_SOURCES=$(aws ec2 describe-security-groups --group-ids "$DB_SG_ID" \
-        --query "SecurityGroups[0].IpPermissions[?FromPort==\`5432\` && ToPort==\`5432\`].IpRanges[].CidrIp" --output text 2>/dev/null)
-
-    if [ "$DB_SOURCES" != "10.0.2.0/24" ]; then
+    if [ -n "$DB_CIDRS" ] || [ -z "$DB_SG_SOURCES" ]; then
         ALL_PASS=false
     fi
 
-    # Check 3: ICMP restriction (no 0.0.0.0/0)
-    local ICMP_WORLD=$(aws ec2 describe-security-groups --group-ids "$WEB_SG_ID" \
-        --query "SecurityGroups[0].IpPermissions[?IpProtocol==\`icmp\`].IpRanges[].CidrIp" --output text 2>/dev/null | grep -c '0.0.0.0/0' || echo 0)
+    if [ -n "$DB_SG_SOURCES" ]; then
+        for SRC_SG in $DB_SG_SOURCES; do
+            if [ "$SRC_SG" != "$API_SG_ID" ]; then
+                ALL_PASS=false
+            fi
+        done
+    fi
 
-    if [ "$ICMP_WORLD" -ne 0 ] 2>/dev/null; then
+    # Check 3: ICMP restriction (SG-scoped only; no CIDR)
+    local ICMP_CIDRS=$(aws ec2 describe-security-groups --group-ids "$WEB_SG_ID" \
+        --query "SecurityGroups[0].IpPermissions[?IpProtocol==\`icmp\`].IpRanges[].CidrIp" --output text 2>/dev/null)
+    local ICMP_SG_SOURCES=$(aws ec2 describe-security-groups --group-ids "$WEB_SG_ID" \
+        --query "SecurityGroups[0].IpPermissions[?IpProtocol==\`icmp\`].UserIdGroupPairs[].GroupId" --output text 2>/dev/null)
+
+    if [ -n "$ICMP_CIDRS" ] || [ -z "$ICMP_SG_SOURCES" ]; then
         ALL_PASS=false
+    fi
+
+    if [ -n "$ICMP_SG_SOURCES" ]; then
+        for SRC_SG in $ICMP_SG_SOURCES; do
+            if [ "$SRC_SG" != "$BASTION_SG_ID" ]; then
+                ALL_PASS=false
+            fi
+        done
     fi
 
     if [ "$ALL_PASS" = true ]; then
