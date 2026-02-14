@@ -35,11 +35,12 @@ module "network" {
 }
 
 module "compute" {
-  source        = "./modules/compute"
-  project_id    = var.project_id
-  region        = var.region
-  zone          = var.zone
-  deployment_id = random_id.deployment.hex
+  source         = "./modules/compute"
+  project_id     = var.project_id
+  region         = var.region
+  zone           = var.zone
+  deployment_id  = random_id.deployment.hex
+  admin_username = var.admin_username
 
   vpc_self_link        = module.network.vpc_self_link
   public_subnet_link   = module.network.public_subnet_link

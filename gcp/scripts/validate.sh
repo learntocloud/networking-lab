@@ -121,11 +121,16 @@ preflight_check() {
     # Get outputs from terraform
     PROJECT_ID=$(get_terraform_output "project_id")
     DEPLOYMENT_ID=$(get_terraform_output "deployment_id")
+    ADMIN_USERNAME=$(get_terraform_output "admin_username")
     BASTION_IP=$(get_terraform_output "bastion_public_ip")
     API_IP=$(get_terraform_output "api_server_private_ip")
     WEB_IP=$(get_terraform_output "web_server_private_ip")
     DB_IP=$(get_terraform_output "database_server_private_ip")
     SSH_KEY="$HOME/.ssh/netlab-key"
+
+    if [ -z "$ADMIN_USERNAME" ]; then
+        ADMIN_USERNAME="labadmin"
+    fi
 
     if [ -z "$PROJECT_ID" ] || [ -z "$BASTION_IP" ]; then
         echo -e "${RED}Error: Could not get terraform outputs. Is the infrastructure deployed?${NC}"
