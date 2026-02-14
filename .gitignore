@@ -33,3 +33,7 @@ Thumbs.db
 
 # Skill solution scripts (contain answers)
 .github/skills/**/scripts/
+
+
+# GCP DNS Transactions
+*./transaction.yaml
