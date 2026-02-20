@@ -19,6 +19,7 @@ A realistic network troubleshooting exercise. You're the on-call engineer—diag
 
 - [Prerequisites](#prerequisites)
 - [Getting Started](#getting-started)
+- [Getting Help](#getting-help)
 - [Incident Queue](#incident-queue)
 - [Verify Your Fixes](#verify-your-fixes)
 - [Clean Up](#clean-up)
@@ -53,6 +54,15 @@ A realistic network troubleshooting exercise. You're the on-call engineer—diag
 The setup script will display SSH connection instructions when complete.
 
 **Cost**: ~$0.50-1.00/session. Destroy when done.
+
+---
+
+## Getting Help
+
+If you run into issues (broken instructions, validation failures you can’t explain, or suspected bugs), please open a **GitHub Issue** in this repo:
+
+- [Open an issue](../issues/new/choose)
+- Include: incident ID (e.g., INC-4521), what you tried, and `./validate.sh` output (redact secrets/tokens).
 
 ---
 
