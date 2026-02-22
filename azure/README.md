@@ -161,25 +161,7 @@ The validation script tests actual connectivity—not just configuration. It SSH
 
 If `./destroy.sh` exits with errors, it is most likely because you created cloud resources while resolving the incidents that are not tracked by Terraform. Terraform cannot delete resources it does not manage, and some Azure resources cannot be deleted while dependent resources still exist.
 
-Read the error message carefully — it will name the resource that is blocking deletion. Delete that resource manually with the Azure CLI, then run `./destroy.sh` again.
-
-Common examples:
-
-- **DNS VNet link** (INC-4522): if you created a VNet link on the private DNS zone, delete it first:
-  ```bash
-  az network private-dns link vnet delete \
-    --resource-group <resource-group> \
-    --zone-name internal.local \
-    --name <link-name> --yes
-  ```
-
-- **NIC/NSG association conflict** (INC-4523/4524): if a VM is being deleted at the same time its NIC is being updated, Azure will block the NIC operation. Remove the NSG from the affected NIC first:
-  ```bash
-  az network nic update \
-    --resource-group <resource-group> \
-    --name <nic-name> \
-    --network-security-group ""
-  ```
+Read the error message carefully — it will name the resource that is blocking deletion. Research how to delete that resource using the Azure CLI, then run `./destroy.sh` again.
 
 ## Clean Up
 
