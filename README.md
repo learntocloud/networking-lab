@@ -35,3 +35,7 @@ Please use **GitHub Issues** for bugs, broken instructions, or unclear steps:
 ## Cost
 
 ~$0.50–1.00 per session. Always destroy resources when done.
+
+## Contributing
+
+The infrastructure is **intentionally misconfigured** — that is the point of the lab. Students fix issues using the cloud provider CLI (`az`, `aws`, `gcloud`), not by editing Terraform. When contributing, do not "fix" broken resources in the Terraform code. If you discover a teardown issue, the right place to address it is in the provider's `destroy.sh` script or in a README troubleshooting note, not by modifying the Terraform modules.

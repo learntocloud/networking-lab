@@ -156,6 +156,14 @@ The validation script tests actual connectivity—not just configuration. It SSH
 
 3. Store your token from the output for submission, we are working on the verification system and will provide submission instructions soon.
 
+## Troubleshooting
+
+### `terraform destroy` fails with errors
+
+If `./destroy.sh` exits with errors, it is most likely because you created cloud resources while resolving the incidents that are not tracked by Terraform. Terraform cannot delete resources it does not manage, and some GCP resources cannot be deleted while dependent resources still exist.
+
+Read the error message carefully — it will name the resource that is blocking deletion. Delete that resource manually with the gcloud CLI, then run `./destroy.sh` again.
+
 ## Clean Up
 
 When finished, destroy resources to avoid charges:
