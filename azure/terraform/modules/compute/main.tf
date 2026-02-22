@@ -34,6 +34,7 @@ resource "azurerm_network_interface" "bastion" {
 resource "azurerm_network_interface_security_group_association" "bastion" {
   network_interface_id      = azurerm_network_interface.bastion.id
   network_security_group_id = var.bastion_nsg_id
+  depends_on                = [azurerm_linux_virtual_machine.bastion]
 }
 
 resource "azurerm_linux_virtual_machine" "bastion" {
@@ -103,6 +104,7 @@ resource "azurerm_network_interface" "web" {
 resource "azurerm_network_interface_security_group_association" "web" {
   network_interface_id      = azurerm_network_interface.web.id
   network_security_group_id = var.web_nsg_id
+  depends_on                = [azurerm_linux_virtual_machine.web]
 }
 
 resource "azurerm_linux_virtual_machine" "web" {
@@ -162,6 +164,7 @@ resource "azurerm_network_interface" "api" {
 resource "azurerm_network_interface_security_group_association" "api" {
   network_interface_id      = azurerm_network_interface.api.id
   network_security_group_id = var.api_nsg_id
+  depends_on                = [azurerm_linux_virtual_machine.api]
 }
 
 resource "azurerm_linux_virtual_machine" "api" {
@@ -221,6 +224,7 @@ resource "azurerm_network_interface" "database" {
 resource "azurerm_network_interface_security_group_association" "database" {
   network_interface_id      = azurerm_network_interface.database.id
   network_security_group_id = var.database_nsg_id
+  depends_on                = [azurerm_linux_virtual_machine.database]
 }
 
 resource "azurerm_linux_virtual_machine" "database" {
