@@ -366,7 +366,7 @@ export_token() {
     echo "  Completed:   $(date -u +"%Y-%m-%d %H:%M:%S UTC")"
     echo "  Challenge:   networking-lab-aws"
     echo ""
-    echo -e "${CYAN}Submit this token at: https://learntocloud.guide/verify${NC}"
+    echo -e "${CYAN}Submit this token at: https://learntocloud.guide/phase/2${NC}"
     echo ""
 }
 
