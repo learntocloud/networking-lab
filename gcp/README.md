@@ -177,3 +177,5 @@ When finished, destroy resources to avoid charges:
    ```bash
    ./destroy.sh
    ```
+
+> **Note:** If `terraform destroy` fails, it's likely because you created resources via gcloud (e.g., firewall rules, DNS records) that Terraform doesn't know about. Delete those resources manually with `gcloud` first, then re-run `./destroy.sh`.

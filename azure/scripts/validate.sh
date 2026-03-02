@@ -39,6 +39,35 @@ get_terraform_output() {
     terraform output -raw "$1" 2>/dev/null || echo ""
 }
 
+# Cross-platform base64 encode (Linux uses -w 0, macOS does not support -w)
+base64_encode_no_wrap() {
+    if printf "test" | base64 -w 0 >/dev/null 2>&1; then
+        printf '%s' "$1" | base64 -w 0
+    else
+        printf '%s' "$1" | base64 | tr -d '\n'
+    fi
+}
+
+# Cross-platform base64 decode (Linux uses -d, macOS uses -D)
+base64_decode_stdin() {
+    if printf "dGVzdA==" | base64 -d >/dev/null 2>&1; then
+        base64 -d
+    else
+        base64 -D
+    fi
+}
+
+# Cross-platform SHA-256 (Linux has sha256sum, macOS has shasum)
+sha256_hex() {
+    if command -v sha256sum >/dev/null 2>&1; then
+        printf '%s' "$1" | sha256sum | awk '{print $1}'
+    elif command -v shasum >/dev/null 2>&1; then
+        printf '%s' "$1" | shasum -a 256 | awk '{print $1}'
+    else
+        printf '%s' "$1" | openssl dgst -sha256 | awk '{print $NF}'
+    fi
+}
+
 # Run a command on a VM via SSH through bastion
 run_on_vm() {
     local TARGET_IP="$1"
@@ -184,7 +213,7 @@ generate_verification_token() {
     local COMPLETION_TIME=$(date -u +"%H:%M:%S")
 
     # Derive verification secret from master secret + instance ID (colon separator for consistency)
-    local VERIFICATION_SECRET=$(echo -n "${MASTER_SECRET}:${DEPLOYMENT_ID}" | sha256sum | cut -d' ' -f1)
+    local VERIFICATION_SECRET=$(sha256_hex "${MASTER_SECRET}:${DEPLOYMENT_ID}")
 
     # Create payload as single-line JSON (matches Linux CTF format for consistency)
     local PAYLOAD='{"github_username":"'"$GITHUB_USER"'","date":"'"$COMPLETION_DATE"'","time":"'"$COMPLETION_TIME"'","timestamp":'"$TIMESTAMP"',"challenge":"networking-lab-azure","challenges":4,"instance_id":"'"$DEPLOYMENT_ID"'"}'
@@ -196,7 +225,7 @@ generate_verification_token() {
     local TOKEN_DATA='{"payload":'"$PAYLOAD"',"signature":"'"$SIGNATURE"'"}'
 
     # Base64 encode the token
-    echo -n "$TOKEN_DATA" | base64 -w 0
+    base64_encode_no_wrap "$TOKEN_DATA"
 }
 
 # =============================================================================
@@ -309,7 +338,7 @@ verify_token() {
     echo ""
 
     # Decode the token
-    local DECODED=$(echo "$TOKEN" | base64 -d 2>/dev/null)
+    local DECODED=$(echo "$TOKEN" | base64_decode_stdin 2>/dev/null)
 
     if [ -z "$DECODED" ]; then
         echo -e "${RED}Error: Invalid token format.${NC}"
@@ -327,7 +356,7 @@ verify_token() {
     fi
 
     # Derive verification secret (colon separator must match generate_verification_token)
-    local VERIFICATION_SECRET=$(echo -n "${MASTER_SECRET}:${INSTANCE_ID}" | sha256sum | cut -d' ' -f1)
+    local VERIFICATION_SECRET=$(sha256_hex "${MASTER_SECRET}:${INSTANCE_ID}")
 
     # Regenerate signature over the exact payload string
     local EXPECTED_SIG=$(echo -n "$PAYLOAD" | openssl dgst -sha256 -hmac "$VERIFICATION_SECRET" | cut -d' ' -f2)

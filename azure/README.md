@@ -114,7 +114,7 @@ You're on call. Four tickets just came in. Your job: diagnose and fix.
 > "Our quarterly security scan flagged several issues with the network segmentation:
 > 
 > 1. SSH is accessible from the internet on some hosts (should only be via bastion)
-> 2. Database accepts connections from too broad a range and is accessible via Bastion (should be API tier only)
+> 2. The database is directly accessible from the bastion host on port 5432 — it should only be reachable from the API tier subnet
 > 3. ICMP is open from anywhere
 > 
 > These need to be tightened up before our compliance review next week."
@@ -176,3 +176,5 @@ When finished, destroy resources to avoid charges:
    ```bash
    ./destroy.sh
    ```
+
+> **Note:** If `terraform destroy` fails, it's likely because you created resources via the Azure CLI (e.g., DNS VNet links, NSG rules) that Terraform doesn't know about. Delete those resources manually with `az` first, then re-run `./destroy.sh`.
