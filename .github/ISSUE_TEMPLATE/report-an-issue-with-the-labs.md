@@ -11,16 +11,16 @@ assignees: madebygps, rishabkumar7, kalebcastillo
 A clear and concise description of what the bug is.
 
 **System (please complete the following information):**
- - OS: [e.g. iOS]
+ - OS: [e.g. macOS, Windows or Linux (Ubunut, etc.)]
  - Cloud Provider: [e.g. AWS, Azure or GCP]
  - Terraform Version: [e.g. 1.13.x]
  - Cloud CLI Provider Version [e.g. aws-cli, azure cli or gcloud]
 
 **To Reproduce**
 Steps to reproduce the behavior:
-1. Go to '...'
-2. Click on '....'
-3. Scroll down to '....'
+1. During Incident INC '...'
+2. Trying to run '....'
+3. Running commands '....'
 4. See error
 
 **Expected behavior**
