@@ -141,8 +141,6 @@ You're on call. Four tickets just came in. Your job: diagnose and fix.
 
 The validation script tests actual connectivity—not just configuration. It SSHs into the VMs and runs the same checks a user would to confirm services are reachable. Sometimes, you may need to wait a minute or two for changes to propogate before validating.
 
-For INC-4522, it queries Route 53 DNS from the web VM and uses the normal system resolver on the web, API, and database VMs. Each hostname must resolve to the correct VM's private IP. Port connectivity is checked separately by INC-4523. Sometimes, you may need to wait a minute or two for changes to propogate before validating.
-
 **When to use it:**
 - After fixing an incident to confirm it's resolved
 - When you think you're done with all incidents
