@@ -173,12 +173,6 @@ For INC-4522, it queries Azure DNS from the web VM and uses the normal system re
 
 ## Troubleshooting
 
-### Upgrading an older lab using `.local`
-
-The lab now uses `internal.test` to avoid Ubuntu's special handling of `.local` for multicast DNS. Older validation queried Azure DNS directly and could pass even when applications could not resolve the names.
-
-For an existing `internal.local` deployment, use its original checkout to destroy it before updating and deploying a fresh lab. Pulling the new scripts alone does not update existing VM configuration. See [private DNS naming](../README.md#private-dns-naming).
-
 ### `terraform destroy` fails with errors
 
 If `./destroy.sh` exits with errors, it is most likely because you created cloud resources while resolving the incidents that are not tracked by Terraform. Terraform cannot delete resources it does not manage, and some Azure resources cannot be deleted while dependent resources still exist.
