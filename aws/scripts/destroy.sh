@@ -47,10 +47,8 @@ fi
 # Destroy
 echo "Cleaning up dependencies (Route53 records, SG references)..."
 
-# Remove non-required Route53 records from the private zone (if present)
-ZONE_ID=$(aws route53 list-hosted-zones-by-name \
-    --dns-name "internal.local" \
-    --query "HostedZones[?Config.PrivateZone==\`true\`].Id" --output text 2>/dev/null | head -n 1)
+# Use this deployment's zone, not a name search that could select another lab.
+ZONE_ID=$(terraform output -raw dns_zone_id)
 ZONE_ID="${ZONE_ID#/hostedzone/}"
 if [ -n "$ZONE_ID" ] && [ "$ZONE_ID" != "None" ]; then
     for _ in {1..5}; do

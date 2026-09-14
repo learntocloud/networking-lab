@@ -3,7 +3,7 @@
 data "aws_region" "current" {}
 
 resource "aws_route53_zone" "internal" {
-  name = "internal.local"
+  name = "internal.test"
 
   vpc {
     vpc_id     = var.vpc_id

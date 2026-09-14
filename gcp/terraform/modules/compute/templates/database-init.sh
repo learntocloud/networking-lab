@@ -46,7 +46,7 @@ Check PostgreSQL:
   sudo -u postgres psql -c "SELECT version();"
 
 Connection info:
-  Host: db.internal.local (after DNS is fixed)
+  Host: db.internal.test (after DNS is fixed)
   Port: 5432
   User: labuser
   Password: labpassword

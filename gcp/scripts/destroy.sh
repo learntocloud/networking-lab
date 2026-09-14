@@ -117,7 +117,7 @@ if [ -n "$PROJECT_ID" ] && command -v gcloud >/dev/null 2>&1; then
 
     # Fallback to deployment-derived zone name if state parsing found nothing.
     if [ "${#ZONE_NAMES[@]}" -eq 0 ] && [ -n "$DEPLOYMENT_ID" ]; then
-        ZONE_NAMES+=("internal-local-${DEPLOYMENT_ID}")
+        ZONE_NAMES+=("internal-test-${DEPLOYMENT_ID}")
     fi
 
     for ZONE_NAME in "${ZONE_NAMES[@]}"; do

@@ -9,6 +9,8 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TERRAFORM_DIR="${SCRIPT_DIR}/../terraform"
 
+source "${SCRIPT_DIR}/../../scripts/dns-validation.sh"
+
 # Colors for output
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -162,15 +164,7 @@ validate_inc_4521() {
 }
 
 validate_inc_4522() {
-    local WEB_RESOLVES
-    local API_RESOLVES
-    local DB_RESOLVES
-
-    WEB_RESOLVES=$(run_on_vm "$WEB_IP" "nslookup web.internal.local 169.254.169.254 2>/dev/null | grep -c 'Address.*10\.' || echo 0")
-    API_RESOLVES=$(run_on_vm "$WEB_IP" "nslookup api.internal.local 169.254.169.254 2>/dev/null | grep -c 'Address.*10\.' || echo 0")
-    DB_RESOLVES=$(run_on_vm "$WEB_IP" "nslookup db.internal.local 169.254.169.254 2>/dev/null | grep -c 'Address.*10\.' || echo 0")
-
-    if [ "$WEB_RESOLVES" -ge 1 ] && [ "$API_RESOLVES" -ge 1 ] && [ "$DB_RESOLVES" -ge 1 ]; then
+    if validate_private_dns "169.254.169.254"; then
         INC_4522="resolved"
     else
         INC_4522="unresolved"

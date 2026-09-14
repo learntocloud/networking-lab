@@ -101,7 +101,7 @@ You're on call. Four tickets just came in. Your job: diagnose and fix.
 **Reported by:** Platform Team  
 **Time:** 10:15 AM
 
-> "Our applications can't resolve internal hostnames anymore. We've been using `web.internal.local`, `api.internal.local`, and `db.internal.local` for service discovery but they stopped resolving. Public DNS works fine - we can resolve google.com. This is blocking deployments."
+> "Our applications can't resolve internal hostnames anymore. We've been using `web.internal.test`, `api.internal.test`, and `db.internal.test` for service discovery but they stopped resolving. Public DNS works fine - we can resolve google.com. This is blocking deployments."
 
 **Affected system:** All VMs
 
