@@ -40,7 +40,7 @@ def health():
 def db_check():
     """Try to connect to database server"""
     import socket
-    db_host = os.environ.get('DB_HOST', 'db.internal.local')
+    db_host = os.environ.get('DB_HOST', 'db.internal.test')
     db_port = 5432
 
     try:
@@ -72,7 +72,7 @@ After=network.target
 Type=simple
 User=root
 WorkingDirectory=/opt/api
-Environment=DB_HOST=db.internal.local
+Environment=DB_HOST=db.internal.test
 ExecStart=/usr/bin/python3 /opt/api/app.py
 Restart=always
 
@@ -99,7 +99,7 @@ Check API service:
   curl http://localhost:8080/db-check
 
 Test connectivity:
-  nc -zv db.internal.local 5432
+  nc -zv db.internal.test 5432
   curl http://localhost:8080/
 
 ============================================================

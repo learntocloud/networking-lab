@@ -66,7 +66,7 @@ Check API service:
   curl http://localhost:8080/
 
 Test connectivity:
-  nc -zv db.internal.local 5432
+  nc -zv db.internal.test 5432
   curl http://localhost:8080/
 
 ============================================================

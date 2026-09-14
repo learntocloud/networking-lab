@@ -1,10 +1,10 @@
 # DNS Module
 
 resource "google_dns_managed_zone" "internal" {
-  name        = "internal-local-${var.deployment_id}"
-  dns_name    = "internal.local."
-  description = "Private DNS zone for networking lab"
-  visibility  = "private"
+  name          = "internal-test-${var.deployment_id}"
+  dns_name      = "internal.test."
+  description   = "Private DNS zone for networking lab"
+  visibility    = "private"
   force_destroy = true
 
   private_visibility_config {

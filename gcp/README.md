@@ -102,7 +102,7 @@ You're on call. Four tickets just came in. Your job: diagnose and fix.
 **Reported by:** Platform Team  
 **Time:** 10:15 AM
 
-> "Our applications can't resolve internal hostnames anymore. We've been using `web.internal.local`, `api.internal.local`, and `db.internal.local` for service discovery but they stopped resolving. Public DNS works fine - we can resolve google.com. This is blocking deployments."
+> "Our applications can't resolve internal hostnames anymore. We've been using `web.internal.test`, `api.internal.test`, and `db.internal.test` for service discovery but they stopped resolving. Public DNS works fine - we can resolve google.com. This is blocking deployments."
 
 **Affected system:** All VMs
 
@@ -142,6 +142,8 @@ You're on call. Four tickets just came in. Your job: diagnose and fix.
 
 The validation script tests actual connectivity—not just configuration. It SSHs into the VMs and runs the same checks a user would to confirm services are reachable.
 
+For INC-4522, it queries Cloud DNS from the web VM and uses the normal system resolver on the web, API, and database VMs. Each hostname must resolve to the correct VM's private IP. Port connectivity is checked separately by INC-4523.
+
 **When to use it:**
 - After fixing an incident to confirm it's resolved
 - When you think you're done with all incidents
@@ -171,6 +173,12 @@ The validation script tests actual connectivity—not just configuration. It SSH
 3. Store your token from the output for submission, we are working on the verification system and will provide submission instructions soon.
 
 ## Troubleshooting
+
+### Upgrading an older lab using `.local`
+
+The lab now uses `internal.test` to avoid Ubuntu's special handling of `.local` for multicast DNS. Older validation queried cloud DNS directly and could pass even when applications could not resolve the names.
+
+For an existing `internal.local` deployment, use its original checkout to destroy it before updating and deploying a fresh lab. Pulling the new scripts alone does not update existing VM configuration. See [private DNS naming](../README.md#private-dns-naming).
 
 ### `terraform destroy` fails with errors
 

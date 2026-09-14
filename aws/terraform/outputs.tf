@@ -13,6 +13,11 @@ output "vpc_id" {
   value       = module.network.vpc_id
 }
 
+output "dns_zone_id" {
+  description = "Private DNS zone ID for this lab"
+  value       = module.dns.dns_zone_id
+}
+
 output "bastion_public_ip" {
   description = "Public IP of the bastion host"
   value       = module.compute.bastion_public_ip

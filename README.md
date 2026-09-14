@@ -39,3 +39,11 @@ Please use **GitHub Issues** for bugs, broken instructions, or unclear steps:
 ## Contributing
 
 The infrastructure is **intentionally misconfigured** — that is the point of the lab. Students fix issues using the cloud provider CLI (`az`, `aws`, `gcloud`), not by editing Terraform. When contributing, do not "fix" broken resources in the Terraform code. If you discover a teardown issue, the right place to address it is in the provider's `destroy.sh` script or in a README troubleshooting note, not by modifying the Terraform modules.
+
+### Private DNS naming
+
+All providers use `internal.test` for the lab's private DNS zone. `.test` is [reserved for testing](https://www.rfc-editor.org/rfc/rfc6761.html#section-6.2) and uses normal application DNS lookups when the private DNS server is configured to answer for it. Avoid `.local`: Ubuntu reserves it for multicast DNS by default, and [Azure recommends against using it for private DNS zones](https://learn.microsoft.com/en-us/azure/dns/private-dns-overview).
+
+INC-4522 requires correct cloud DNS answers and successful system-resolver lookups on the web, API, and database VMs. The shared check in `scripts/dns-validation.sh` uses the provider's SSH helper; cloud DNS is queried from the web VM, where DNS tools are installed. System lookups use `getent ahostsv4`, without requiring DNS tools on the API VM. This keeps DNS independent of the intentional port restrictions in INC-4523.
+
+Run the offline DNS regression checks with `bash tests/dns-validation.sh`. They mock SSH and DNS commands; they do not deploy cloud resources or replace live lab validation.
