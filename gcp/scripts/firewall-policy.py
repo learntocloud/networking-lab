@@ -189,11 +189,11 @@ def assess(args):
         if leaked:
             failures.append(f"{label} permits unauthorized source {ipaddress.IPv4Address(leaked[0][0])}.")
         if not contains(allowed, required):
-            failures.append(f"{label} blocks required source {ipaddress.IPv4Address(required)}.")
+            failures.append(f"{label} blocks its required source.")
     if failures:
-        print(f"Trusted bastion SSH source: {trusted}/32. " + " ".join(failures))
+        print("Bastion SSH must be restricted to the current client's public IPv4 /32. " + " ".join(failures))
         return 1
-    print(f"Effective ingress source restrictions passed; trusted bastion SSH source {trusted}/32.")
+    print("Effective ingress source restrictions passed; bastion SSH is limited to the current client's public IPv4 /32.")
     return 0
 
 

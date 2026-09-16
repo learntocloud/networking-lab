@@ -216,7 +216,8 @@ or source network tags are valid if required clients retain access.
 | Bastion | `nc -zvw3 <DB_PRIVATE_IP> 5432` | Connection fails or times out. |
 
 The trusted `/32` is the client address seen by the bastion over SSH. If it
-changes, update the bastion rule with gcloud before validating. Private-only
+changes, update the bastion rule with gcloud before validating. Validation
+checks this address without echoing it in status output. Private-only
 VMs are not directly reachable from the internet, but broad rules still expose
 them to unauthorized internal sources.
 

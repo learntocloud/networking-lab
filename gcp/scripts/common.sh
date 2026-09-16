@@ -261,5 +261,5 @@ check_hardening() {
             return 2
         fi
     done
-    HARDENING_DETAIL="Effective source restrictions and live allowed/denied traffic passed (trusted SSH source $TRUSTED_IP/32)."
+    HARDENING_DETAIL="Effective source restrictions and live allowed/denied traffic passed (bastion SSH limited to the current client's public IPv4 /32)."
 }
