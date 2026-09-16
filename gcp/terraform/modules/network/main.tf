@@ -43,6 +43,7 @@ resource "google_compute_router" "main" {
 }
 
 resource "google_compute_router_nat" "main" {
+  # setup.sh removes private-subnet coverage only after bootstrap succeeds.
   name                               = "nat-${var.deployment_id}"
   router                             = google_compute_router.main.name
   region                             = var.region

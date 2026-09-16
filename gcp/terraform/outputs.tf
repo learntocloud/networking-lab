@@ -8,6 +8,11 @@ output "region" {
   value       = var.region
 }
 
+output "zone" {
+  description = "Zone containing the lab VMs"
+  value       = var.zone
+}
+
 output "deployment_id" {
   description = "Unique deployment identifier"
   value       = random_id.deployment.hex

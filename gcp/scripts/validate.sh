@@ -4,17 +4,17 @@
 # Validates incident resolution by testing actual connectivity
 # =============================================================================
 
-set -e
+set -eo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TERRAFORM_DIR="${SCRIPT_DIR}/../terraform"
 
+source "${SCRIPT_DIR}/common.sh"
 source "${SCRIPT_DIR}/../../scripts/dns-validation.sh"
 
 # Colors for output
 RED='\033[0;31m'
 GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
 CYAN='\033[0;36m'
 NC='\033[0m'
 
@@ -27,18 +27,9 @@ INC_4524="pending"
 # Master secret for token generation (matches verification service)
 MASTER_SECRET="L2C_CTF_MASTER_2024"
 
-# SSH options for non-interactive use
-SSH_OPTS="-n -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=10 -o BatchMode=yes -q"
-ADMIN_USERNAME="labadmin"
-
 # =============================================================================
 # Helper Functions
 # =============================================================================
-
-get_terraform_output() {
-    cd "$TERRAFORM_DIR"
-    terraform output -raw "$1" 2>/dev/null || echo ""
-}
 
 base64_encode_no_wrap() {
     if printf "test" | base64 -w 0 >/dev/null 2>&1; then
@@ -66,87 +57,33 @@ sha256_hex() {
     fi
 }
 
-# Run a command on a VM via SSH through bastion
-run_on_vm() {
-    local TARGET_IP="$1"
-    local CMD="$2"
-    local CMD_B64
-
-    CMD_B64=$(base64_encode_no_wrap "$CMD")
-
-    ssh $SSH_OPTS -i "$SSH_KEY" "${ADMIN_USERNAME}@${BASTION_IP}" \
-        "ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null ${ADMIN_USERNAME}@${TARGET_IP} \"printf '%s' '$CMD_B64' | (base64 -d 2>/dev/null || base64 --decode 2>/dev/null) | bash\"" \
-        2>/dev/null | tr -d '\n\r'
-}
-
 # =============================================================================
-# Pre-flight checks (silent)
+# Pre-flight checks
 # =============================================================================
 
 preflight_check() {
+    require_commands gcloud terraform ssh jq python3 curl openssl base64
     # Check if terraform state exists
     if [ ! -f "${TERRAFORM_DIR}/terraform.tfstate" ]; then
         echo -e "${RED}Error: No terraform state found. Run './setup.sh' first.${NC}"
-        exit 1
+        exit 2
     fi
 
     # Check for SSH key
     if [ ! -f "$HOME/.ssh/netlab-key" ]; then
         echo -e "${RED}Error: SSH key not found at ~/.ssh/netlab-key${NC}"
         echo "Run: cd ../terraform && terraform output -raw ssh_private_key > ~/.ssh/netlab-key && chmod 600 ~/.ssh/netlab-key"
-        exit 1
+        exit 2
     fi
 
-    # Check gcloud CLI
-    if ! command -v gcloud &> /dev/null; then
-        echo -e "${RED}Error: gcloud CLI not found.${NC}"
-        exit 1
-    fi
-
-    # Check required local tools
-    local REQUIRED_CMDS=("terraform" "ssh" "jq" "openssl" "base64")
-    local cmd
-    for cmd in "${REQUIRED_CMDS[@]}"; do
-        if ! command -v "$cmd" >/dev/null 2>&1; then
-            echo -e "${RED}Error: Required command '$cmd' not found in PATH.${NC}"
-            exit 1
+    load_lab_outputs
+    local IP
+    for IP in "$BASTION_IP" "$WEB_IP" "$API_IP" "$DB_IP"; do
+        if ! check_vm_tools "$IP"; then
+            echo "Error: Cannot run validation on $IP; check SSH and diagnostic tools." >&2
+            exit 2
         fi
     done
-    # Ensure at least one SHA-256 implementation is available
-    if ! command -v sha256sum >/dev/null 2>&1 && \
-       ! command -v shasum >/dev/null 2>&1 && \
-       ! command -v openssl >/dev/null 2>&1; then
-        echo -e "${RED}Error: Required command for SHA-256 ('sha256sum', 'shasum', or 'openssl') not found in PATH.${NC}"
-        exit 1
-    fi
-
-    # Get outputs from terraform
-    PROJECT_ID=$(get_terraform_output "project_id")
-    DEPLOYMENT_ID=$(get_terraform_output "deployment_id")
-    ADMIN_USERNAME=$(get_terraform_output "admin_username")
-    BASTION_IP=$(get_terraform_output "bastion_public_ip")
-    API_IP=$(get_terraform_output "api_server_private_ip")
-    WEB_IP=$(get_terraform_output "web_server_private_ip")
-    DB_IP=$(get_terraform_output "database_server_private_ip")
-    SSH_KEY="$HOME/.ssh/netlab-key"
-
-    if [ -z "$ADMIN_USERNAME" ]; then
-        ADMIN_USERNAME="labadmin"
-    fi
-
-    if [ -z "$PROJECT_ID" ] || [ -z "$BASTION_IP" ]; then
-        echo -e "${RED}Error: Could not get terraform outputs. Is the infrastructure deployed?${NC}"
-        exit 1
-    fi
-
-    # Test bastion connectivity
-    if ! ssh $SSH_OPTS -i "$SSH_KEY" "${ADMIN_USERNAME}@${BASTION_IP}" "echo ok" >/dev/null 2>&1; then
-        echo -e "${RED}Error: Cannot reach bastion host${NC}"
-        exit 1
-    fi
-
-    # Export for other functions
-    export PROJECT_ID DEPLOYMENT_ID BASTION_IP API_IP WEB_IP DB_IP SSH_KEY
 }
 
 # =============================================================================
@@ -154,81 +91,40 @@ preflight_check() {
 # =============================================================================
 
 validate_inc_4521() {
-    local RESULT
-    RESULT=$(run_on_vm "$API_IP" "curl -s --max-time 10 -o /dev/null -w '%{http_code}' https://example.com 2>/dev/null || echo 'failed'")
-    if [ "$RESULT" == "200" ]; then
-        INC_4521="resolved"
-    else
-        INC_4521="unresolved"
-    fi
+    local STATUS=0
+    check_api_egress || STATUS=$?
+    record_incident INC_4521 "$STATUS" "$EGRESS_DETAIL"
 }
 
 validate_inc_4522() {
-    if validate_private_dns "169.254.169.254"; then
-        INC_4522="resolved"
-    else
-        INC_4522="unresolved"
-    fi
+    local ATTEMPT STATUS
+    for ATTEMPT in {1..3}; do
+        STATUS=0
+        validate_private_dns "169.254.169.254" "$BASTION_IP" "$WEB_IP" "$API_IP" "$DB_IP" || STATUS=$?
+        if [ "$STATUS" -ne 1 ]; then break; fi
+        if [ "$ATTEMPT" -lt 3 ]; then sleep 2; fi
+    done
+    record_incident INC_4522 "$STATUS" "$DNS_DETAIL"
 }
 
 validate_inc_4523() {
-    local WEB_TO_API
-    local API_TO_DB
-
-    WEB_TO_API=$(run_on_vm "$WEB_IP" "nc -zw3 $API_IP 8080 && echo 1 || echo 0")
-    API_TO_DB=$(run_on_vm "$API_IP" "nc -zw3 $DB_IP 5432 && echo 1 || echo 0")
-
-    WEB_TO_API=${WEB_TO_API:-0}
-    API_TO_DB=${API_TO_DB:-0}
-
-    if [ "$WEB_TO_API" -eq 1 ] 2>/dev/null && [ "$API_TO_DB" -eq 1 ] 2>/dev/null; then
-        INC_4523="resolved"
-    else
-        INC_4523="unresolved"
-    fi
+    local STATUS=0
+    check_application_paths || STATUS=$?
+    record_incident INC_4523 "$STATUS" "$PORTS_DETAIL"
 }
 
 validate_inc_4524() {
-    local ALL_PASS=true
+    local STATUS=0
+    check_hardening || STATUS=$?
+    record_incident INC_4524 "$STATUS" "$HARDENING_DETAIL"
+}
 
-    # Check 1: SSH source restriction
-    local SSH_WORLD=0
-    for RULE in "allow-ssh-bastion-${DEPLOYMENT_ID}" "allow-ssh-web-${DEPLOYMENT_ID}" "allow-ssh-api-${DEPLOYMENT_ID}" "allow-ssh-db-${DEPLOYMENT_ID}"; do
-        local SSH_SOURCE
-        SSH_SOURCE=$( (gcloud compute firewall-rules describe "$RULE" \
-            --project "$PROJECT_ID" --format="value(sourceRanges)" 2>/dev/null || echo "*") | tr -d '\r')
-        if echo "$SSH_SOURCE" | grep -q "0.0.0.0/0"; then
-            SSH_WORLD=1
-        fi
-    done
-
-    if [ "$SSH_WORLD" -ne 0 ]; then
-        ALL_PASS=false
-    fi
-
-    # Check 2: Database source restriction
-    local PG_SOURCE
-    PG_SOURCE=$( (gcloud compute firewall-rules describe "allow-postgres-${DEPLOYMENT_ID}" \
-        --project "$PROJECT_ID" --format="value(sourceRanges)" 2>/dev/null || echo "") | tr -d '\r')
-
-    if ! echo "$PG_SOURCE" | grep -q "10.0.2.0/24"; then
-        ALL_PASS=false
-    fi
-
-    # Check 3: ICMP restriction
-    local ICMP_SOURCE
-    ICMP_SOURCE=$( (gcloud compute firewall-rules describe "allow-icmp-${DEPLOYMENT_ID}" \
-        --project "$PROJECT_ID" --format="value(sourceRanges)" 2>/dev/null || echo "*") | tr -d '\r')
-
-    if echo "$ICMP_SOURCE" | grep -q "0.0.0.0/0"; then
-        ALL_PASS=false
-    fi
-
-    if [ "$ALL_PASS" = true ]; then
-        INC_4524="resolved"
-    else
-        INC_4524="unresolved"
-    fi
+record_incident() {
+    case "$2" in
+        0) printf -v "$1" '%s' resolved ;;
+        1) printf -v "$1" '%s' unresolved ;;
+        *) printf -v "$1" '%s' error; echo "Error: $1: $3" >&2 ;;
+    esac
 }
 
 # =============================================================================
@@ -310,6 +206,10 @@ show_status() {
 
     echo ""
     echo "  Resolved: $RESOLVED / $TOTAL"
+    echo "  INC-4521 ($INC_4521): $EGRESS_DETAIL"
+    echo "  INC-4522 ($INC_4522): $DNS_DETAIL"
+    echo "  INC-4523 ($INC_4523): $PORTS_DETAIL"
+    echo "  INC-4524 ($INC_4524): $HARDENING_DETAIL"
     echo ""
 
     if [ $RESOLVED -eq $TOTAL ]; then
@@ -321,17 +221,22 @@ show_status() {
         echo "  your completion token."
         echo ""
     fi
+    if [[ " $INC_4521 $INC_4522 $INC_4523 $INC_4524 " == *" error "* ]]; then return 2; fi
+    [ "$RESOLVED" -eq "$TOTAL" ]
 }
 
 export_token() {
-    # Run validation first (silently check)
-    preflight_check > /dev/null 2>&1
+    preflight_check
 
     # Run all validations
-    validate_inc_4521 > /dev/null 2>&1
-    validate_inc_4522 > /dev/null 2>&1
-    validate_inc_4523 > /dev/null 2>&1
-    validate_inc_4524 > /dev/null 2>&1
+    validate_inc_4521
+    validate_inc_4522
+    validate_inc_4523
+    validate_inc_4524
+    if [[ " $INC_4521 $INC_4522 $INC_4523 $INC_4524 " == *" error "* ]]; then
+        echo "Error: Validation could not complete; no token was generated." >&2
+        exit 2
+    fi
 
     # Check if all resolved
     local RESOLVED=0
@@ -490,4 +395,6 @@ main() {
     echo ""
 }
 
-main "$@"
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+    main "$@"
+fi

@@ -1,6 +1,6 @@
 # Firewall rules - includes intentional misconfigurations for incidents
 
-# Bastion SSH from internet (expected)
+# Bastion SSH is initially too broad (INC-4524).
 resource "google_compute_firewall" "allow_ssh_bastion" {
   name    = "allow-ssh-bastion-${var.deployment_id}"
   network = google_compute_network.main.name
@@ -133,33 +133,5 @@ resource "google_compute_firewall" "deny_api_to_db" {
   }
 }
 
-# API egress rules (INC-4521)
-resource "google_compute_firewall" "allow_api_internal_egress" {
-  name    = "allow-api-internal-egress-${var.deployment_id}"
-  network = google_compute_network.main.name
-
-  direction = "EGRESS"
-  priority  = 900
-
-  destination_ranges = [var.vpc_cidr]
-  target_tags        = ["api"]
-
-  allow {
-    protocol = "all"
-  }
-}
-
-resource "google_compute_firewall" "deny_api_internet_egress" {
-  name    = "deny-api-internet-egress-${var.deployment_id}"
-  network = google_compute_network.main.name
-
-  direction = "EGRESS"
-  priority  = 1000
-
-  destination_ranges = ["0.0.0.0/0"]
-  target_tags        = ["api"]
-
-  deny {
-    protocol = "all"
-  }
-}
+# INC-4521 is prepared by removing private-subnet Cloud NAT coverage after
+# startup, not by blocking package installation or public DNS with a firewall.

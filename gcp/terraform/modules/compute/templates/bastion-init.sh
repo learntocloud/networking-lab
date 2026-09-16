@@ -5,6 +5,8 @@ set -e
 # Install useful networking tools
 apt-get update
 apt-get install -y \
+    python3 \
+    iputils-ping \
     net-tools \
     dnsutils \
     traceroute \
@@ -46,3 +48,4 @@ Useful commands:
 EOF
 
 echo "Bastion host setup complete"
+touch /var/lib/netlab-startup-complete

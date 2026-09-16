@@ -5,6 +5,8 @@ set -e
 # Install PostgreSQL and tools
 apt-get update
 apt-get install -y \
+    python3 \
+    iputils-ping \
     postgresql \
     postgresql-contrib \
     net-tools \
@@ -18,7 +20,7 @@ apt-get install -y \
 # Configure PostgreSQL to listen on all interfaces
 sed -i "s/#listen_addresses = 'localhost'/listen_addresses = '*'/" /etc/postgresql/*/main/postgresql.conf
 
-# Allow connections from private subnet (for Task 5, this won't work until the VPC firewall rule is fixed)
+# Firewall policy controls which lab hosts can reach PostgreSQL.
 echo "host    all             all             10.0.0.0/16             md5" >> /etc/postgresql/*/main/pg_hba.conf
 
 # Restart PostgreSQL
@@ -59,3 +61,4 @@ Test local connection:
 EOF
 
 echo "Database server setup complete"
+touch /var/lib/netlab-startup-complete
