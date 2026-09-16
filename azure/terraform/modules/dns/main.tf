@@ -1,4 +1,4 @@
-# DNS Module
+# INC-4522: VNet link intentionally absent.
 
 resource "azurerm_private_dns_zone" "internal" {
   name                = "internal.test"

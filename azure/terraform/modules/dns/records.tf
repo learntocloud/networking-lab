@@ -1,2 +1,1 @@
-# DNS Records placeholder
-# A records for internal services should be configured here
+# INC-4522: Service records intentionally absent.

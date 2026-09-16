@@ -8,6 +8,11 @@ output "deployment_id" {
   value       = random_id.deployment.hex
 }
 
+output "private_subnet_id" {
+  description = "Subnet where setup prepares the outbound connectivity incident"
+  value       = module.network.private_subnet_id
+}
+
 output "resource_group_name" {
   description = "Resource group name"
   value       = azurerm_resource_group.main.name
