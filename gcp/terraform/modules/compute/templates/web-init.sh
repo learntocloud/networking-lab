@@ -5,6 +5,8 @@ set -e
 # Install nginx and tools
 apt-get update
 apt-get install -y \
+    python3 \
+    iputils-ping \
     nginx \
     openssl \
     net-tools \
@@ -81,3 +83,4 @@ Check nginx:
 EOF
 
 echo "Web server setup complete"
+touch /var/lib/netlab-startup-complete

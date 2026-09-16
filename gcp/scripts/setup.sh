@@ -4,10 +4,11 @@
 # Deploys the intentionally broken infrastructure for learning
 # =============================================================================
 
-set -e
+set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TERRAFORM_DIR="${SCRIPT_DIR}/../terraform"
+source "${SCRIPT_DIR}/common.sh"
 
 # Colors
 RED='\033[0;31m'
@@ -27,6 +28,7 @@ echo ""
 # -----------------------------------------------------------------------------
 
 echo "Checking prerequisites..."
+require_commands jq ssh python3 curl
 
 # Check gcloud CLI
 if ! command -v gcloud &> /dev/null; then
@@ -114,6 +116,14 @@ TF_VAR_project_id="$PROJECT_ID" terraform plan -out=tfplan
 # Apply
 echo ""
 echo "Applying infrastructure..."
+report_setup_failure() {
+    local STATUS=$?
+    if [ "$STATUS" -ne 0 ]; then
+        echo "Error: Lab preparation failed; the lab is NOT ready." >&2
+        echo "Resources may remain. Retry setup or run $SCRIPT_DIR/destroy.sh to avoid charges." >&2
+    fi
+}
+trap report_setup_failure EXIT
 TF_VAR_project_id="$PROJECT_ID" terraform apply tfplan
 
 # Clean up plan file
@@ -131,12 +141,75 @@ echo -e "${GREEN}============================================${NC}"
 # Save SSH key
 echo ""
 echo "Saving SSH key..."
-terraform output -raw ssh_private_key > ~/.ssh/netlab-key 2>/dev/null
+mkdir -p "$HOME/.ssh"
+(umask 077; terraform output -raw ssh_private_key > "$HOME/.ssh/netlab-key")
 chmod 600 ~/.ssh/netlab-key
 echo -e "  ${GREEN}✓${NC} SSH key saved to ~/.ssh/netlab-key"
 
-# Show deployment region
-REGION=$(terraform output -raw region 2>/dev/null)
+load_lab_outputs
+echo "Waiting for GCE startup scripts and diagnostic tools..."
+for IP in "$BASTION_IP" "$WEB_IP" "$API_IP" "$DB_IP"; do
+    READY=false
+    for ATTEMPT in {1..60}; do
+        if run_on_vm "$IP" 'test -f /var/lib/netlab-startup-complete' 10; then
+            READY=true
+            break
+        fi
+        sleep 5
+    done
+    if [ "$READY" != true ]; then
+        echo "Error: Startup did not complete on $IP. Inspect sudo journalctl -u google-startup-scripts.service." >&2
+        exit 1
+    fi
+    check_vm_tools "$IP"
+done
+run_on_vm "$WEB_IP" 'curl -fsS --max-time 10 http://localhost/health && curl -kfsS --max-time 10 https://localhost/health'
+
+STATUS=0
+check_application_paths || STATUS=$?
+if [ "$STATUS" -ne 1 ] || [ "$WEB_API_STATE" != unresolved ] || [ "$API_DB_STATE" != unresolved ]; then
+    echo "Error: Expected both application paths blocked with healthy local services. $PORTS_DETAIL" >&2
+    exit 1
+fi
+if ! check_api_egress; then
+    echo "Error: Healthy bootstrap egress was not established. $EGRESS_DETAIL" >&2
+    exit 1
+fi
+
+echo "Preparing the outbound connectivity incident..."
+gcloud compute routers nats update "nat-$DEPLOYMENT_ID" --router "router-$DEPLOYMENT_ID" \
+    --project "$PROJECT_ID" --region "$REGION" \
+    --nat-custom-subnet-ip-ranges="subnet-database-$DEPLOYMENT_ID" --quiet
+FAULT_READY=false
+for ATTEMPT in {1..6}; do
+    if probe_api_https; then
+        sleep 5
+    else
+        STATUS=$?
+        if [ "$STATUS" -eq 1 ]; then FAULT_READY=true; break; fi
+        echo "Error: Could not confirm initial egress fault. $EGRESS_DETAIL" >&2
+        exit 1
+    fi
+done
+if [ "$FAULT_READY" != true ]; then
+    echo "Error: API external HTTPS still works after preparing the NAT incident." >&2
+    exit 1
+fi
+if ! probe_api_health "$API_IP" 127.0.0.1; then
+    echo "Error: API health failed after preparing NAT incident. $SERVICE_DETAIL" >&2
+    exit 1
+fi
+for IP in "$BASTION_IP" "$WEB_IP" "$API_IP" "$DB_IP"; do
+    if ! run_on_vm "$IP" '
+        ANSWER=$(dig +time=3 +tries=2 +short @169.254.169.254 google.com A) &&
+        printf "%s\n" "$ANSWER" | grep -Eq "^[0-9]+(\.[0-9]+){3}$" &&
+        timeout 10 getent ahostsv4 google.com >/dev/null
+    '; then
+        echo "Error: Public DNS baseline failed on $IP." >&2
+        exit 1
+    fi
+done
+
 echo -e "  ${GREEN}✓${NC} Region: $REGION"
 
 echo ""
@@ -146,10 +219,11 @@ echo -e "${BLUE}============================================${NC}"
 echo ""
 echo "Your broken infrastructure is deployed."
 echo "Work through the tasks in README.md to fix it."
+terraform output -raw connection_instructions
 echo ""
 echo "Validate your progress anytime with:"
-echo "  ./scripts/validate.sh"
+echo "  $SCRIPT_DIR/validate.sh"
 echo ""
 echo "When done, clean up with:"
-echo "  ./scripts/destroy.sh"
+echo "  $SCRIPT_DIR/destroy.sh"
 echo ""

@@ -34,7 +34,7 @@ resource "google_compute_instance" "bastion" {
   }
 
   metadata = {
-    "ssh-keys"      = local.ssh_metadata
+    "ssh-keys" = local.ssh_metadata
     "startup-script" = templatefile("${path.module}/templates/bastion-init.sh", {
       ssh_private_key = tls_private_key.ssh.private_key_pem
       admin_username  = var.admin_username
@@ -71,7 +71,7 @@ resource "google_compute_instance" "web" {
   }
 
   metadata = {
-    "ssh-keys"      = local.ssh_metadata
+    "ssh-keys" = local.ssh_metadata
     "startup-script" = templatefile("${path.module}/templates/web-init.sh", {
       admin_username = var.admin_username
     })
@@ -105,7 +105,7 @@ resource "google_compute_instance" "api" {
   }
 
   metadata = {
-    "ssh-keys"      = local.ssh_metadata
+    "ssh-keys" = local.ssh_metadata
     "startup-script" = templatefile("${path.module}/templates/api-init.sh", {
       admin_username = var.admin_username
     })
@@ -139,7 +139,7 @@ resource "google_compute_instance" "database" {
   }
 
   metadata = {
-    "ssh-keys"      = local.ssh_metadata
+    "ssh-keys" = local.ssh_metadata
     "startup-script" = templatefile("${path.module}/templates/database-init.sh", {
       admin_username = var.admin_username
     })

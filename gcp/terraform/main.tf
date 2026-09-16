@@ -35,6 +35,9 @@ module "network" {
 }
 
 module "compute" {
+  # Startup scripts need Cloud NAT and firewall rules ready.
+  depends_on = [module.network]
+
   source         = "./modules/compute"
   project_id     = var.project_id
   region         = var.region

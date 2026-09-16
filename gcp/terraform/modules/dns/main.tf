@@ -1,4 +1,4 @@
-# DNS Module
+# The private zone authorizes the VPC; INC-4522 service records are absent.
 
 resource "google_dns_managed_zone" "internal" {
   name          = "internal-test-${var.deployment_id}"
