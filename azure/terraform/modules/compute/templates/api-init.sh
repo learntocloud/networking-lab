@@ -7,6 +7,7 @@ apt-get update
 apt-get install -y \
     python3 \
     python3-flask \
+    postgresql-client \
     net-tools \
     dnsutils \
     traceroute \
@@ -52,7 +53,7 @@ def db_check():
         if result == 0:
             return jsonify({'database': 'reachable', 'host': db_host, 'port': db_port})
         else:
-            return jsonify({'database': 'unreachable', 'host': db_host, 'port': db_port, 'error': 'connection refused'}), 503
+            return jsonify({'database': 'unreachable', 'host': db_host, 'port': db_port, 'error': os.strerror(result)}), 503
     except socket.gaierror:
         return jsonify({'database': 'unreachable', 'host': db_host, 'error': 'DNS resolution failed'}), 503
     except Exception as e:
@@ -101,6 +102,9 @@ Check API service:
 Test connectivity:
   nc -zv db.internal.test 5432
   curl http://localhost:8080/
+
+For INC-4523 before DNS is fixed, use the database private IP:
+  pg_isready -h <database-private-ip> -p 5432 -t 3
 
 ============================================================
 EOF

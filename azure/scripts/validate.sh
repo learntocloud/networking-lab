@@ -9,6 +9,7 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TERRAFORM_DIR="${SCRIPT_DIR}/../terraform"
 
+source "${SCRIPT_DIR}/common.sh"
 source "${SCRIPT_DIR}/../../scripts/dns-validation.sh"
 
 # Colors for output
@@ -29,17 +30,9 @@ INCIDENTS["INC-4524"]="pending"
 # Using same format as Linux CTF but distinct secret for networking lab
 MASTER_SECRET="L2C_CTF_MASTER_2024"
 
-# SSH options for non-interactive use (-n prevents stdin consumption)
-SSH_OPTS="-n -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=10 -o BatchMode=yes -q"
-
 # =============================================================================
 # Helper Functions
 # =============================================================================
-
-get_terraform_output() {
-    cd "$TERRAFORM_DIR"
-    terraform output -raw "$1" 2>/dev/null || echo ""
-}
 
 # Cross-platform base64 encode (Linux uses -w 0, macOS does not support -w)
 base64_encode_no_wrap() {
@@ -70,52 +63,38 @@ sha256_hex() {
     fi
 }
 
-# Run a command on a VM via SSH through bastion
-run_on_vm() {
-    local TARGET_IP="$1"
-    local CMD="$2"
-
-    ssh $SSH_OPTS -i "$SSH_KEY" labadmin@"$BASTION_IP" \
-        "ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null labadmin@$TARGET_IP '$CMD'" 2>/dev/null | tr -d '\n\r'
-}
-
 # =============================================================================
-# Pre-flight checks (silent)
+# Pre-flight checks
 # =============================================================================
 
 preflight_check() {
+    require_commands az terraform jq ssh python3 curl
+    if ! az account show -o none; then
+        echo "Error: Azure authentication is required. Run 'az login'." >&2
+        exit 2
+    fi
     # Check if terraform state exists
     if [ ! -f "${TERRAFORM_DIR}/terraform.tfstate" ]; then
         echo -e "${RED}Error: No terraform state found. Run './setup.sh' first.${NC}"
-        exit 1
+        exit 2
     fi
 
     # Check for SSH key
     if [ ! -f "$HOME/.ssh/netlab-key" ]; then
         echo -e "${RED}Error: SSH key not found at ~/.ssh/netlab-key${NC}"
         echo "Run: cd ../terraform && terraform output -raw ssh_private_key > ~/.ssh/netlab-key && chmod 600 ~/.ssh/netlab-key"
-        exit 1
+        exit 2
     fi
 
-    # Get outputs from terraform
-    RESOURCE_GROUP=$(get_terraform_output "resource_group_name")
-    DEPLOYMENT_ID=$(get_terraform_output "deployment_id")
-    BASTION_IP=$(get_terraform_output "bastion_public_ip")
-    API_IP=$(get_terraform_output "api_server_private_ip")
-    WEB_IP=$(get_terraform_output "web_server_private_ip")
-    DB_IP=$(get_terraform_output "database_server_private_ip")
-    SSH_KEY="$HOME/.ssh/netlab-key"
+    load_lab_outputs
 
-    if [ -z "$RESOURCE_GROUP" ] || [ -z "$BASTION_IP" ]; then
-        echo -e "${RED}Error: Could not get terraform outputs. Is the infrastructure deployed?${NC}"
-        exit 1
-    fi
-
-    # Test bastion connectivity
-    if ! ssh $SSH_OPTS -i "$SSH_KEY" labadmin@"$BASTION_IP" "echo ok" >/dev/null 2>&1; then
-        echo -e "${RED}Error: Cannot reach bastion host${NC}"
-        exit 1
-    fi
+    local IP
+    for IP in "$BASTION_IP" "$WEB_IP" "$API_IP" "$DB_IP"; do
+        if ! check_vm_tools "$IP"; then
+            echo "Error: Cannot run validation on $IP; check SSH access and diagnostic tools." >&2
+            exit 2
+        fi
+    done
 
     # Export for other functions
     export RESOURCE_GROUP DEPLOYMENT_ID BASTION_IP API_IP WEB_IP DB_IP SSH_KEY
@@ -126,98 +105,68 @@ preflight_check() {
 # =============================================================================
 
 validate_inc_4521() {
-    local RESULT=$(run_on_vm "$API_IP" "curl -s --max-time 10 -o /dev/null -w '%{http_code}' https://example.com 2>/dev/null || echo 'failed'")
-    [ "$RESULT" == "200" ] && INCIDENTS["INC-4521"]="resolved" || INCIDENTS["INC-4521"]="unresolved"
-}
-
-validate_inc_4522() {
-    if validate_private_dns "168.63.129.16"; then
-        INCIDENTS["INC-4522"]="resolved"
+    local STATUS
+    if check_api_egress; then
+        INCIDENTS["INC-4521"]="resolved"
     else
-        INCIDENTS["INC-4522"]="unresolved"
+        STATUS=$?
+        if [ "$STATUS" -eq 1 ]; then
+            INCIDENTS["INC-4521"]="unresolved"
+        else
+            INCIDENTS["INC-4521"]="error"
+            echo "Error: INC-4521: $EGRESS_DETAIL" >&2
+        fi
     fi
 }
 
+validate_inc_4522() {
+    local ATTEMPT STATUS
+    for ATTEMPT in {1..3}; do
+        if validate_private_dns "168.63.129.16" "$BASTION_IP" "$WEB_IP" "$API_IP" "$DB_IP"; then
+            INCIDENTS["INC-4522"]="resolved"
+            return
+        else
+            STATUS=$?
+        fi
+        if [ "$STATUS" -ne 1 ]; then
+            INCIDENTS["INC-4522"]="error"
+            echo "Error: INC-4522: $DNS_DETAIL" >&2
+            return
+        fi
+        if [ "$ATTEMPT" -lt 3 ]; then
+            sleep 2
+        fi
+    done
+    INCIDENTS["INC-4522"]="unresolved"
+}
+
 validate_inc_4523() {
-    local WEB_TO_API=$(run_on_vm "$WEB_IP" "nc -zw3 $API_IP 8080 && echo 1 || echo 0")
-    local API_TO_DB=$(run_on_vm "$API_IP" "nc -zw3 $DB_IP 5432 && echo 1 || echo 0")
-    WEB_TO_API=${WEB_TO_API:-0}
-    API_TO_DB=${API_TO_DB:-0}
-    
-    if [ "$WEB_TO_API" -eq 1 ] 2>/dev/null && [ "$API_TO_DB" -eq 1 ] 2>/dev/null; then
+    local STATUS
+    if check_application_paths; then
         INCIDENTS["INC-4523"]="resolved"
     else
-        INCIDENTS["INC-4523"]="unresolved"
+        STATUS=$?
+        if [ "$STATUS" -eq 1 ]; then
+            INCIDENTS["INC-4523"]="unresolved"
+        else
+            INCIDENTS["INC-4523"]="error"
+            echo "Error: INC-4523: $PORTS_DETAIL" >&2
+        fi
     fi
 }
 
 validate_inc_4524() {
-    local ALL_PASS=true
-    
-    # Check 1: SSH source restriction (including bastion)
-    local BASTION_NSG="nsg-bastion-${DEPLOYMENT_ID}"
-    local WEB_NSG="nsg-web-${DEPLOYMENT_ID}"
-    local API_NSG="nsg-api-${DEPLOYMENT_ID}"
-    local DB_NSG="nsg-database-${DEPLOYMENT_ID}"
-    local BASTION_SSH_SOURCE=$( (az network nsg rule show -g "$RESOURCE_GROUP" \
-        --nsg-name "$BASTION_NSG" -n allow-ssh-inbound \
-        --query "sourceAddressPrefix" -o tsv 2>/dev/null || echo "*") | tr -d '\r')
-    local WEB_SSH_SOURCE=$( (az network nsg rule show -g "$RESOURCE_GROUP" \
-        --nsg-name "$WEB_NSG" -n allow-ssh \
-        --query "sourceAddressPrefix" -o tsv 2>/dev/null || echo "*") | tr -d '\r')
-    local API_SSH_SOURCE=$( (az network nsg rule show -g "$RESOURCE_GROUP" \
-        --nsg-name "$API_NSG" -n allow-ssh \
-        --query "sourceAddressPrefix" -o tsv 2>/dev/null || echo "*") | tr -d '\r')
-    local DB_SSH_SOURCE=$( (az network nsg rule show -g "$RESOURCE_GROUP" \
-        --nsg-name "$DB_NSG" -n allow-ssh \
-        --query "sourceAddressPrefix" -o tsv 2>/dev/null || echo "*") | tr -d '\r')
-
-    if [ "$BASTION_SSH_SOURCE" == "*" ] || [ "$BASTION_SSH_SOURCE" == "0.0.0.0/0" ] || [ "$BASTION_SSH_SOURCE" == "Internet" ]; then
-        ALL_PASS=false
-    fi
-    
-    if [ "$WEB_SSH_SOURCE" == "*" ] || [ "$WEB_SSH_SOURCE" == "0.0.0.0/0" ] || [ "$WEB_SSH_SOURCE" == "Internet" ]; then
-        ALL_PASS=false
-    fi
-
-    if [ "$API_SSH_SOURCE" == "*" ] || [ "$API_SSH_SOURCE" == "0.0.0.0/0" ] || [ "$API_SSH_SOURCE" == "Internet" ]; then
-        ALL_PASS=false
-    fi
-
-    if [ "$DB_SSH_SOURCE" == "*" ] || [ "$DB_SSH_SOURCE" == "0.0.0.0/0" ] || [ "$DB_SSH_SOURCE" == "Internet" ]; then
-        ALL_PASS=false
-    fi
-    
-    # Check 2: Database source restriction
-    local PG_SOURCE=$( (az network nsg rule show -g "$RESOURCE_GROUP" \
-        --nsg-name "$DB_NSG" -n postgres-access \
-        --query "sourceAddressPrefix" -o tsv 2>/dev/null || echo "") | tr -d '\r')
-    
-    if [ "$PG_SOURCE" != "10.0.2.0/24" ]; then
-        ALL_PASS=false
-    fi
-    
-    # Check 3: Bastion to DB blocked
-    local BASTION_TO_DB=$(ssh $SSH_OPTS -i "$SSH_KEY" labadmin@"$BASTION_IP" \
-        "nc -zv $DB_IP 5432 -w 3 2>&1 | grep -c 'succeeded\|open' || echo 0" 2>/dev/null | tr -d '\n\r')
-    
-    if [ "$BASTION_TO_DB" -ne 0 ] 2>/dev/null; then
-        ALL_PASS=false
-    fi
-    
-    # Check 4: ICMP restriction
-    local ICMP_SOURCE=$( (az network nsg rule show -g "$RESOURCE_GROUP" \
-        --nsg-name "$WEB_NSG" -n allow-icmp \
-        --query "sourceAddressPrefix" -o tsv 2>/dev/null || echo "deleted") | tr -d '\r')
-    
-    if [ "$ICMP_SOURCE" == "*" ] || [ "$ICMP_SOURCE" == "0.0.0.0/0" ] || [ "$ICMP_SOURCE" == "Internet" ]; then
-        ALL_PASS=false
-    fi
-    
-    if [ "$ALL_PASS" = true ]; then
+    local STATUS
+    if check_hardening; then
         INCIDENTS["INC-4524"]="resolved"
     else
-        INCIDENTS["INC-4524"]="unresolved"
+        STATUS=$?
+        if [ "$STATUS" -eq 1 ]; then
+            INCIDENTS["INC-4524"]="unresolved"
+        else
+            INCIDENTS["INC-4524"]="error"
+            echo "Error: INC-4524: $HARDENING_DETAIL" >&2
+        fi
     fi
 }
 
@@ -261,15 +210,23 @@ show_status() {
     
     local RESOLVED=0
     local TOTAL=4
+    local ERRORS=0
     
     for INC in "INC-4521" "INC-4522" "INC-4523" "INC-4524"; do
         if [ "${INCIDENTS[$INC]}" == "resolved" ]; then
             echo -e "  ${GREEN}✓${NC} $INC"
             RESOLVED=$((RESOLVED + 1))
+        elif [ "${INCIDENTS[$INC]}" == "error" ]; then
+            echo -e "  ${YELLOW}!${NC} $INC (validation error)"
+            ERRORS=$((ERRORS + 1))
         else
             echo -e "  ${RED}✗${NC} $INC"
         fi
     done
+    echo "  INC-4521: $EGRESS_DETAIL"
+    echo "  INC-4522: $DNS_DETAIL"
+    echo "  INC-4523: $PORTS_DETAIL"
+    echo "  INC-4524: $HARDENING_DETAIL"
     
     echo ""
     echo "  Resolved: $RESOLVED / $TOTAL"
@@ -284,21 +241,29 @@ show_status() {
         echo "  your completion token."
         echo ""
     fi
+
+    if [ "$ERRORS" -gt 0 ]; then
+        return 2
+    fi
+    [ "$RESOLVED" -eq "$TOTAL" ]
 }
 
 export_token() {
-    # Run validation first (silently check)
-    preflight_check > /dev/null 2>&1
+    preflight_check
 
     # Run all validations
-    validate_inc_4521 > /dev/null 2>&1
-    validate_inc_4522 > /dev/null 2>&1
-    validate_inc_4523 > /dev/null 2>&1
-    validate_inc_4524 > /dev/null 2>&1
+    validate_inc_4521
+    validate_inc_4522
+    validate_inc_4523
+    validate_inc_4524
 
     # Check if all resolved
     local RESOLVED=0
     for INC in "INC-4521" "INC-4522" "INC-4523" "INC-4524"; do
+        if [ "${INCIDENTS[$INC]}" == "error" ]; then
+            echo "Error: Validation could not complete for $INC; no token generated." >&2
+            exit 2
+        fi
         [ "${INCIDENTS[$INC]}" == "resolved" ] && RESOLVED=$((RESOLVED + 1))
     done
 
@@ -410,6 +375,8 @@ usage() {
     echo "  $0              # Check incident status"
     echo "  $0 export       # Generate completion token"
     echo "  $0 verify <token>"
+    echo ""
+    echo "Status exit codes: 0 = all resolved, 1 = unresolved, 2 = validation error"
 }
 
 main() {
@@ -422,7 +389,11 @@ main() {
             validate_inc_4522
             validate_inc_4523
             validate_inc_4524
-            show_status
+            if show_status; then
+                return 0
+            else
+                return $?
+            fi
             ;;
         export)
             export_token
@@ -444,4 +415,6 @@ main() {
     echo ""
 }
 
-main "$@"
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+    main "$@"
+fi
