@@ -244,9 +244,12 @@ check_application_paths() {
     local ATTEMPT STATUS WEB_DETAIL
     WEB_API_STATE=error
     API_DB_STATE=error
-    if ! probe_api_health "$API_IP" 127.0.0.1 ||
-        ! probe_postgres "$DB_IP" 127.0.0.1; then
-        PORTS_DETAIL="Local service health failed; network rules cannot be assessed. $SERVICE_DETAIL"
+    if ! probe_api_health "$API_IP" 127.0.0.1; then
+        PORTS_DETAIL="Local API health failed; network rules cannot be assessed. $SERVICE_DETAIL"
+        return 2
+    fi
+    if ! probe_postgres "$DB_IP" 127.0.0.1; then
+        PORTS_DETAIL="Local database health failed; network rules cannot be assessed. $SERVICE_DETAIL"
         return 2
     fi
     if ! run_on_vm "$API_IP" 'command -v pg_isready >/dev/null'; then

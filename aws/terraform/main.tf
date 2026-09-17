@@ -26,7 +26,8 @@ resource "random_id" "deployment" {
 
 # Looked up here rather than inside the compute module: the compute module
 # depends on the whole network module, and a data source inside it would be
-# deferred (and force instance replacement) on every re-run.
+# deferred (and force instance replacement) on every re-run. Existing instances
+# ignore later AMI changes (see the compute module's lifecycle blocks).
 data "aws_ami" "ubuntu" {
   most_recent = true
   owners      = ["099720109477"]

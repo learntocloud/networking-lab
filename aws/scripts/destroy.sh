@@ -144,11 +144,17 @@ delete_extra_security_groups() {
 
 sweep_extra_security_groups
 
-# Remove the instances first so that security groups created outside Terraform
-# are no longer attached; otherwise an unmanaged group blocks VPC deletion and
+# Remove the instances and the lab's own security groups first. Terraform
+# revokes the managed groups' rules on delete, which also drops any rule that
+# references a group created outside Terraform, so those groups can then be
+# deleted before the VPC; otherwise an unmanaged group blocks VPC deletion and
 # Terraform retries for its full 20-minute timeout before failing.
-echo "Destroying instances..."
-terraform destroy -target=module.compute -auto-approve
+echo "Destroying instances and lab security groups..."
+TARGETS=(-target=module.compute)
+while IFS= read -r ADDRESS; do
+    [ -n "$ADDRESS" ] && TARGETS+=("-target=$ADDRESS")
+done < <(terraform state list 2>/dev/null | grep '\.aws_security_group\.' || true)
+terraform destroy "${TARGETS[@]}" -auto-approve
 delete_extra_security_groups
 
 echo "Destroying remaining infrastructure..."

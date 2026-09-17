@@ -33,6 +33,11 @@ resource "aws_instance" "bastion" {
     project = "networking-lab"
     role    = "bastion"
   }
+
+  lifecycle {
+    # A newer Ubuntu image must not replace instances when setup is re-run.
+    ignore_changes = [ami]
+  }
 }
 
 resource "aws_eip" "bastion" {
@@ -73,6 +78,11 @@ resource "aws_instance" "web" {
     project = "networking-lab"
     role    = "web"
   }
+
+  lifecycle {
+    # A newer Ubuntu image must not replace instances when setup is re-run.
+    ignore_changes = [ami]
+  }
 }
 
 resource "aws_eip" "web" {
@@ -111,6 +121,11 @@ resource "aws_instance" "api" {
     project = "networking-lab"
     role    = "api"
   }
+
+  lifecycle {
+    # A newer Ubuntu image must not replace instances when setup is re-run.
+    ignore_changes = [ami]
+  }
 }
 
 # =============================================================================
@@ -134,5 +149,10 @@ resource "aws_instance" "database" {
     Name    = "vm-database-${var.deployment_id}"
     project = "networking-lab"
     role    = "database"
+  }
+
+  lifecycle {
+    # A newer Ubuntu image must not replace instances when setup is re-run.
+    ignore_changes = [ami]
   }
 }
