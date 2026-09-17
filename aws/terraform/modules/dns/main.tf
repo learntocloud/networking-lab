@@ -1,4 +1,4 @@
-# DNS Module
+# Private hosted zone associated with the lab VPC. INC-4522 service records are absent.
 
 data "aws_region" "current" {}
 
@@ -14,3 +14,4 @@ resource "aws_route53_zone" "internal" {
     project = "networking-lab"
   }
 }
+

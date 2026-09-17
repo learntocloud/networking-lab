@@ -60,7 +60,10 @@ resource "aws_subnet" "database" {
 }
 
 # =============================================================================
-# NAT GATEWAY (intentionally missing private route table route)
+# NAT GATEWAY
+# The private route table starts with a working default route so that EC2
+# bootstrap (package installation) succeeds. setup.sh deletes that route after
+# initialization to prepare INC-4521.
 # =============================================================================
 
 resource "aws_eip" "nat" {
@@ -105,12 +108,21 @@ resource "aws_route_table" "public" {
 resource "aws_route_table" "private" {
   vpc_id = aws_vpc.main.id
 
-  # Intentional break: missing 0.0.0.0/0 -> NAT Gateway route
+  # Routes are managed by aws_route resources so setup.sh can remove the
+  # default route after bootstrap without Terraform re-adding it silently.
 
   tags = {
     Name    = "rt-private-${var.deployment_id}"
     project = "networking-lab"
   }
+}
+
+# INC-4521: setup.sh deletes this route once cloud-init has finished on every
+# instance. Rerunning setup recreates it and prepares the fault again.
+resource "aws_route" "private_nat" {
+  route_table_id         = aws_route_table.private.id
+  destination_cidr_block = "0.0.0.0/0"
+  nat_gateway_id         = aws_nat_gateway.main.id
 }
 
 resource "aws_route_table" "database" {
@@ -144,7 +156,8 @@ resource "aws_route_table_association" "database" {
 }
 
 # =============================================================================
-# DATABASE NETWORK ACL (intentional deny for 5432)
+# DATABASE NETWORK ACL (INC-4523: stateless deny for inbound TCP 5432)
+# Rule order matters: the deny at 100 is evaluated before the allow at 200.
 # =============================================================================
 
 resource "aws_network_acl" "database" {

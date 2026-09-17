@@ -41,3 +41,8 @@ variable "db_sg_id" {
 variable "vpc_id" {
   type = string
 }
+
+variable "ami_id" {
+  description = "AMI for all lab instances (looked up in the root module so re-runs do not replace instances)"
+  type        = string
+}

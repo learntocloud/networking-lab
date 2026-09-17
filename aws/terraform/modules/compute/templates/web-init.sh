@@ -1,6 +1,7 @@
 #!/bin/bash
 # Web server initialization script
 set -e
+export DEBIAN_FRONTEND=noninteractive
 
 admin_username="${admin_username}"
 ssh_public_key="${ssh_public_key}"
@@ -20,8 +21,10 @@ chmod 600 /home/${admin_username}/.ssh/authorized_keys
 chown -R ${admin_username}:${admin_username} /home/${admin_username}/.ssh
 
 # Install nginx and tools
-apt-get update
-apt-get install -y \
+apt-get -o DPkg::Lock::Timeout=600 update
+apt-get -o DPkg::Lock::Timeout=600 install -y \
+  python3 \
+  iputils-ping \
   nginx \
   openssl \
   net-tools \
@@ -85,7 +88,7 @@ cat > /etc/motd << 'EOF'
    NETWORKING LAB - WEB SERVER
 ============================================================
 
-You are on the web server in the PRIVATE subnet.
+You are on the web server in the PUBLIC subnet (it has a public IP).
 This server runs nginx on ports 80 (HTTP) and 443 (HTTPS).
 
 Check nginx:
@@ -98,3 +101,4 @@ Check nginx:
 EOF
 
 echo "Web server setup complete"
+touch /var/lib/netlab-startup-complete

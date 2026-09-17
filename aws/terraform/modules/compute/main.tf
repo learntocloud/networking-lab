@@ -10,27 +10,12 @@ resource "aws_key_pair" "lab" {
   public_key = tls_private_key.ssh.public_key_openssh
 }
 
-data "aws_ami" "ubuntu" {
-  most_recent = true
-  owners      = ["099720109477"]
-
-  filter {
-    name   = "name"
-    values = ["ubuntu/images/hvm-ssd/ubuntu-jammy-22.04-amd64-server-*"]
-  }
-
-  filter {
-    name   = "virtualization-type"
-    values = ["hvm"]
-  }
-}
-
 # =============================================================================
 # BASTION HOST (Public Subnet)
 # =============================================================================
 
 resource "aws_instance" "bastion" {
-  ami                         = data.aws_ami.ubuntu.id
+  ami                         = var.ami_id
   instance_type               = "t3.micro"
   subnet_id                   = var.public_subnet_id
   vpc_security_group_ids      = [var.bastion_sg_id]
@@ -65,13 +50,15 @@ resource "aws_eip_association" "bastion" {
 }
 
 # =============================================================================
-# WEB SERVER (Private Subnet + Public IP for HTTP/HTTPS testing)
+# WEB SERVER (Public Subnet + Elastic IP for HTTP/HTTPS testing)
+# In AWS an instance's public IP only works when its subnet routes 0.0.0.0/0 to
+# the internet gateway, so the web server lives in the public subnet.
 # =============================================================================
 
 resource "aws_instance" "web" {
-  ami                         = data.aws_ami.ubuntu.id
+  ami                         = var.ami_id
   instance_type               = "t3.micro"
-  subnet_id                   = var.private_subnet_id
+  subnet_id                   = var.public_subnet_id
   vpc_security_group_ids      = [var.web_sg_id]
   key_name                    = aws_key_pair.lab.key_name
   associate_public_ip_address = true
@@ -107,7 +94,7 @@ resource "aws_eip_association" "web" {
 # =============================================================================
 
 resource "aws_instance" "api" {
-  ami                         = data.aws_ami.ubuntu.id
+  ami                         = var.ami_id
   instance_type               = "t3.micro"
   subnet_id                   = var.private_subnet_id
   vpc_security_group_ids      = [var.api_sg_id]
@@ -131,7 +118,7 @@ resource "aws_instance" "api" {
 # =============================================================================
 
 resource "aws_instance" "database" {
-  ami                         = data.aws_ami.ubuntu.id
+  ami                         = var.ami_id
   instance_type               = "t3.micro"
   subnet_id                   = var.database_subnet_id
   vpc_security_group_ids      = [var.db_sg_id]

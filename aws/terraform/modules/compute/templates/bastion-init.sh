@@ -1,6 +1,7 @@
 #!/bin/bash
 # Bastion host initialization script
 set -e
+export DEBIAN_FRONTEND=noninteractive
 
 admin_username="${admin_username}"
 ssh_public_key="${ssh_public_key}"
@@ -12,8 +13,10 @@ if ! id -u "$admin_username" >/dev/null 2>&1; then
 fi
 
 # Install useful networking tools
-apt-get update
-apt-get install -y \
+apt-get -o DPkg::Lock::Timeout=600 update
+apt-get -o DPkg::Lock::Timeout=600 install -y \
+    python3 \
+    iputils-ping \
     net-tools \
     dnsutils \
     traceroute \
@@ -47,7 +50,7 @@ cat > /etc/motd << 'EOF'
 You are on the bastion host in the PUBLIC subnet.
 From here you can SSH to other hosts in the lab:
 
-  ssh <private-ip>      # Connect to web/api/database servers
+  ssh <private-ip>      # Connect to web/api/database servers (key preinstalled)
 
 Useful commands:
   ip addr               # Show network interfaces
@@ -63,3 +66,4 @@ Useful commands:
 EOF
 
 echo "Bastion host setup complete"
+touch /var/lib/netlab-startup-complete

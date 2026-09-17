@@ -1,6 +1,7 @@
 #!/bin/bash
-# Database server initialization script
+# Database server initialization script (runs via cloud-init user data)
 set -e
+export DEBIAN_FRONTEND=noninteractive
 
 admin_username="${admin_username}"
 ssh_public_key="${ssh_public_key}"
@@ -19,42 +20,34 @@ SSHKEY
 chmod 600 /home/${admin_username}/.ssh/authorized_keys
 chown -R ${admin_username}:${admin_username} /home/${admin_username}/.ssh
 
-# Create simple DB listener (offline)
-mkdir -p /opt/db
-cat > /opt/db/db-listener.py << 'PYAPP'
-import socket
+# Install PostgreSQL and diagnostic tools (through the database subnet's NAT route)
+apt-get -o DPkg::Lock::Timeout=600 update
+apt-get -o DPkg::Lock::Timeout=600 install -y \
+  python3 \
+  iputils-ping \
+  postgresql \
+  postgresql-contrib \
+  net-tools \
+  dnsutils \
+  traceroute \
+  netcat-openbsd \
+  curl \
+  jq \
+  vim
 
-HOST = "0.0.0.0"
-PORT = 5432
+# Listen on all interfaces; security groups and the network ACL decide who can connect.
+sed -i "s/#listen_addresses = 'localhost'/listen_addresses = '*'/" /etc/postgresql/*/main/postgresql.conf
+echo "host    all             all             10.0.0.0/16             md5" >> /etc/postgresql/*/main/pg_hba.conf
 
-with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-  s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-  s.bind((HOST, PORT))
-  s.listen(5)
-  while True:
-    conn, _ = s.accept()
-    conn.close()
-PYAPP
+systemctl restart postgresql
+systemctl enable postgresql
 
-cat > /etc/systemd/system/db-listener.service << 'SVCFILE'
-[Unit]
-Description=Networking Lab DB Listener
-After=network.target
-
-[Service]
-Type=simple
-User=root
-WorkingDirectory=/opt/db
-ExecStart=/usr/bin/python3 /opt/db/db-listener.py
-Restart=always
-
-[Install]
-WantedBy=multi-user.target
-SVCFILE
-
-systemctl daemon-reload
-systemctl enable db-listener
-systemctl start db-listener
+# Create a test database and user
+sudo -u postgres psql << 'SQLCMD'
+CREATE USER labuser WITH PASSWORD 'labpassword';
+CREATE DATABASE labdb OWNER labuser;
+GRANT ALL PRIVILEGES ON DATABASE labdb TO labuser;
+SQLCMD
 
 # Create MOTD
 cat > /etc/motd << 'EOF'
@@ -63,13 +56,21 @@ cat > /etc/motd << 'EOF'
 ============================================================
 
 You are on the database server in the DATABASE subnet.
-This server runs a simple TCP listener on port 5432.
+This server runs PostgreSQL on port 5432.
 
-Check listener:
-  sudo systemctl status db-listener
-  nc -zv localhost 5432
+Check PostgreSQL:
+  sudo systemctl status postgresql
+  pg_isready -h 127.0.0.1 -p 5432 -U labuser -d labdb -t 3
+
+Connection info:
+  Host: db.internal.test (after DNS is fixed)
+  Port: 5432
+  User: labuser
+  Password: labpassword
+  Database: labdb
 
 ============================================================
 EOF
 
 echo "Database server setup complete"
+touch /var/lib/netlab-startup-complete
