@@ -28,13 +28,8 @@ Fix deliberately broken cloud network infrastructure. Learn by troubleshooting r
 
 ## Having Trouble?
 
-Please use **GitHub Issues** for bugs, broken instructions, or unclear steps:
-
-- Open an issue: [GitHub Issues](https://github.com/learntocloud/networking-lab/issues/new/choose)
-- Include: cloud/provider, which incident/step you’re on, what you expected vs what happened, and the output of the validation script (redact secrets/tokens).
+Report bugs, broken instructions, or unclear steps through [GitHub Issues](https://github.com/learntocloud/networking-lab/issues/new/choose).
 
 ## Contributing
 
-Preserve the **intentional misconfigurations** that make up the challenges. Students resolve them using the cloud provider CLI (`az`, `aws`, `gcloud`), not by editing Terraform.
-
-Fix unintended infrastructure, setup, validation, or teardown bugs at their source, including Terraform when appropriate. Changes should keep the intended faults reproducible and the lab deployable and removable.
+Read [CONTRIBUTING.md](CONTRIBUTING.md) for contribution guidelines and the manual testing required before opening a pull request.
