@@ -37,3 +37,8 @@ Thumbs.db
 
 # GCP DNS Transactions
 *./transaction.yaml
+# Python bytecode
+__pycache__/
+
+# Terraform plan files written by setup.sh
+tfplan

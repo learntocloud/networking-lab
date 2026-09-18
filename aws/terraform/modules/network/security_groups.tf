@@ -1,4 +1,8 @@
 # Security Groups (intentional misconfigurations for learning)
+#
+# Security groups are stateful and allow-only: every attached group's rules are
+# additive, and there are no deny rules or priorities. INC-4523 and INC-4524 are
+# repaired with the AWS CLI, not by editing these definitions.
 
 resource "aws_security_group" "bastion" {
   name        = "netlab-bastion-${var.deployment_id}"
@@ -12,7 +16,7 @@ resource "aws_security_group" "bastion" {
   }
 
   ingress {
-    description = "SSH from anywhere (intentional)"
+    description = "SSH from anywhere (INC-4524)"
     from_port   = 22
     to_port     = 22
     protocol    = "tcp"
@@ -60,7 +64,7 @@ resource "aws_security_group" "web" {
   }
 
   ingress {
-    description = "SSH from anywhere (intentional)"
+    description = "SSH from anywhere (INC-4524)"
     from_port   = 22
     to_port     = 22
     protocol    = "tcp"
@@ -68,13 +72,14 @@ resource "aws_security_group" "web" {
   }
 
   ingress {
-    description = "ICMP from anywhere (intentional)"
+    description = "ICMP from anywhere (INC-4524)"
     from_port   = -1
     to_port     = -1
     protocol    = "icmp"
     cidr_blocks = ["0.0.0.0/0"]
   }
 
+  # INC-4523: no egress to the API on TCP 8080.
   egress {
     description = "Allow outbound web only"
     from_port   = 80
@@ -109,14 +114,16 @@ resource "aws_security_group" "api" {
   }
 
   ingress {
-    description = "SSH from anywhere (intentional)"
+    description = "SSH from anywhere (INC-4524)"
     from_port   = 22
     to_port     = 22
     protocol    = "tcp"
     cidr_blocks = ["0.0.0.0/0"]
   }
 
-  # Intentional break: missing inbound 8080 from web
+  # INC-4523: no ingress on TCP 8080 from the web tier, and no egress to the
+  # database on TCP 5432. Package installation only needs HTTP/HTTPS egress;
+  # Amazon-provided DNS is not filtered by security groups.
 
   egress {
     description = "Allow outbound web only"
@@ -152,7 +159,7 @@ resource "aws_security_group" "database" {
   }
 
   ingress {
-    description = "SSH from anywhere (intentional)"
+    description = "SSH from anywhere (INC-4524)"
     from_port   = 22
     to_port     = 22
     protocol    = "tcp"
@@ -160,7 +167,7 @@ resource "aws_security_group" "database" {
   }
 
   ingress {
-    description = "Postgres from anywhere (intentional)"
+    description = "Postgres from anywhere (INC-4524)"
     from_port   = 5432
     to_port     = 5432
     protocol    = "tcp"

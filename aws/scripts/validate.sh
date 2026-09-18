@@ -1,24 +1,24 @@
 #!/bin/bash
 # =============================================================================
-# NETWORKING LAB - AWS VALIDATION SCRIPT
+# NETWORKING LAB - VALIDATION SCRIPT (AWS)
 # Validates incident resolution by testing actual connectivity
 # =============================================================================
 
-set -e
+set -eo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TERRAFORM_DIR="${SCRIPT_DIR}/../terraform"
 
+source "${SCRIPT_DIR}/common.sh"
 source "${SCRIPT_DIR}/../../scripts/dns-validation.sh"
 
 # Colors for output
 RED='\033[0;31m'
 GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
 CYAN='\033[0;36m'
 NC='\033[0m'
 
-# Incident tracking 
+# Incident tracking (POSIX-friendly)
 INC_4521="pending"
 INC_4522="pending"
 INC_4523="pending"
@@ -27,19 +27,10 @@ INC_4524="pending"
 # Master secret for token generation (matches verification service)
 MASTER_SECRET="L2C_CTF_MASTER_2024"
 
-# SSH options for non-interactive use (-n prevents stdin consumption)
-SSH_OPTS="-n -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=10 -o BatchMode=yes -q"
-
 # =============================================================================
 # Helper Functions
 # =============================================================================
 
-get_terraform_output() {
-    cd "$TERRAFORM_DIR"
-    terraform output -raw "$1" 2>/dev/null || echo ""
-}
-
-# Cross-platform base64 encode (Linux uses -w 0, macOS does not support -w)
 base64_encode_no_wrap() {
     if printf "test" | base64 -w 0 >/dev/null 2>&1; then
         printf '%s' "$1" | base64 -w 0
@@ -48,7 +39,6 @@ base64_encode_no_wrap() {
     fi
 }
 
-# Cross-platform base64 decode (Linux uses -d, macOS uses -D)
 base64_decode_stdin() {
     if printf "dGVzdA==" | base64 -d >/dev/null 2>&1; then
         base64 -d
@@ -57,7 +47,6 @@ base64_decode_stdin() {
     fi
 }
 
-# Cross-platform SHA-256 (Linux has sha256sum, macOS has shasum)
 sha256_hex() {
     if command -v sha256sum >/dev/null 2>&1; then
         printf '%s' "$1" | sha256sum | awk '{print $1}'
@@ -68,60 +57,37 @@ sha256_hex() {
     fi
 }
 
-# Run a command on a VM via SSH through bastion
-run_on_vm() {
-    local TARGET_IP="$1"
-    local CMD="$2"
-
-    ssh $SSH_OPTS -i "$SSH_KEY" "$ADMIN_USERNAME@$BASTION_IP" \
-        "ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null $ADMIN_USERNAME@$TARGET_IP '$CMD' 2>/dev/null" 2>/dev/null | tr -d '\n\r'
-}
-
 # =============================================================================
-# Pre-flight checks (silent)
+# Pre-flight checks
 # =============================================================================
 
 preflight_check() {
+    require_commands aws terraform ssh jq python3 curl openssl base64
+    if ! aws sts get-caller-identity --output text >/dev/null; then
+        echo "Error: AWS credentials are not configured. Run 'aws configure'." >&2
+        exit 2
+    fi
     # Check if terraform state exists
     if [ ! -f "${TERRAFORM_DIR}/terraform.tfstate" ]; then
         echo -e "${RED}Error: No terraform state found. Run './setup.sh' first.${NC}"
-        exit 1
+        exit 2
     fi
 
     # Check for SSH key
     if [ ! -f "$HOME/.ssh/netlab-key" ]; then
         echo -e "${RED}Error: SSH key not found at ~/.ssh/netlab-key${NC}"
         echo "Run: cd ../terraform && terraform output -raw ssh_private_key > ~/.ssh/netlab-key && chmod 600 ~/.ssh/netlab-key"
-        exit 1
+        exit 2
     fi
 
-    # Get outputs from terraform
-    DEPLOYMENT_ID=$(get_terraform_output "deployment_id")
-    BASTION_IP=$(get_terraform_output "bastion_public_ip")
-    WEB_IP=$(get_terraform_output "web_server_private_ip")
-    API_IP=$(get_terraform_output "api_server_private_ip")
-    DB_IP=$(get_terraform_output "database_server_private_ip")
-    SSH_KEY="$HOME/.ssh/netlab-key"
-    ADMIN_USERNAME=$(get_terraform_output "admin_username")
-
-    BASTION_SG_ID=$(get_terraform_output "bastion_sg_id")
-    WEB_SG_ID=$(get_terraform_output "web_sg_id")
-    API_SG_ID=$(get_terraform_output "api_sg_id")
-    DB_SG_ID=$(get_terraform_output "db_sg_id")
-
-    if [ -z "$BASTION_IP" ] || [ -z "$ADMIN_USERNAME" ]; then
-        echo -e "${RED}Error: Could not get terraform outputs. Is the infrastructure deployed?${NC}"
-        exit 1
-    fi
-
-    # Test bastion connectivity
-    if ! ssh $SSH_OPTS -i "$SSH_KEY" "$ADMIN_USERNAME@$BASTION_IP" "echo ok" >/dev/null 2>&1; then
-        echo -e "${RED}Error: Cannot reach bastion host${NC}"
-        exit 1
-    fi
-
-    export DEPLOYMENT_ID BASTION_IP WEB_IP API_IP DB_IP SSH_KEY ADMIN_USERNAME
-    export BASTION_SG_ID WEB_SG_ID API_SG_ID DB_SG_ID
+    load_lab_outputs
+    local IP
+    for IP in "$BASTION_IP" "$WEB_IP" "$API_IP" "$DB_IP"; do
+        if ! check_vm_tools "$IP"; then
+            echo "Error: Cannot run validation on $IP; check SSH and diagnostic tools." >&2
+            exit 2
+        fi
+    done
 }
 
 # =============================================================================
@@ -129,124 +95,40 @@ preflight_check() {
 # =============================================================================
 
 validate_inc_4521() {
-    local RESULT=$(run_on_vm "$API_IP" "curl -s --max-time 10 -o /dev/null -w '%{http_code}' https://example.com 2>/dev/null || echo 'failed'")
-    if [ "$RESULT" == "200" ]; then
-        INC_4521="resolved"
-    else
-        INC_4521="unresolved"
-    fi
+    local STATUS=0
+    check_api_egress || STATUS=$?
+    record_incident INC_4521 "$STATUS" "$EGRESS_DETAIL"
 }
 
 validate_inc_4522() {
-    if validate_private_dns "169.254.169.253"; then
-        INC_4522="resolved"
-    else
-        INC_4522="unresolved"
-    fi
+    local ATTEMPT STATUS
+    for ATTEMPT in {1..3}; do
+        STATUS=0
+        validate_private_dns "169.254.169.253" "$BASTION_IP" "$WEB_IP" "$API_IP" "$DB_IP" || STATUS=$?
+        if [ "$STATUS" -ne 1 ]; then break; fi
+        if [ "$ATTEMPT" -lt 3 ]; then sleep 2; fi
+    done
+    record_incident INC_4522 "$STATUS" "$DNS_DETAIL"
 }
 
 validate_inc_4523() {
-    local WEB_TO_API=$(run_on_vm "$WEB_IP" "nc -zw3 $API_IP 8080 && echo 1 || echo 0")
-    local API_TO_DB=$(run_on_vm "$API_IP" "nc -zw3 $DB_IP 5432 && echo 1 || echo 0")
-    WEB_TO_API=${WEB_TO_API:-0}
-    API_TO_DB=${API_TO_DB:-0}
-
-    if [ "$WEB_TO_API" -eq 1 ] 2>/dev/null && [ "$API_TO_DB" -eq 1 ] 2>/dev/null; then
-        INC_4523="resolved"
-    else
-        INC_4523="unresolved"
-    fi
+    local STATUS=0
+    check_application_paths || STATUS=$?
+    record_incident INC_4523 "$STATUS" "$PORTS_DETAIL"
 }
 
 validate_inc_4524() {
-    local ALL_PASS=true
+    local STATUS=0
+    check_hardening || STATUS=$?
+    record_incident INC_4524 "$STATUS" "$HARDENING_DETAIL"
+}
 
-    # Check 1: Bastion SSH source restriction (must not be internet-open)
-    local BASTION_SSH_CIDRS=$(aws ec2 describe-security-groups --group-ids "$BASTION_SG_ID" \
-        --query "SecurityGroups[0].IpPermissions[?FromPort==\`22\` && ToPort==\`22\`].IpRanges[].CidrIp" --output text 2>/dev/null)
-    local BASTION_SSH_SG_SOURCES=$(aws ec2 describe-security-groups --group-ids "$BASTION_SG_ID" \
-        --query "SecurityGroups[0].IpPermissions[?FromPort==\`22\` && ToPort==\`22\`].UserIdGroupPairs[].GroupId" --output text 2>/dev/null)
-    BASTION_SSH_CIDRS=$(printf '%s' "$BASTION_SSH_CIDRS" | tr -d '\r')
-    BASTION_SSH_SG_SOURCES=$(printf '%s' "$BASTION_SSH_SG_SOURCES" | tr -d '\r')
-
-    if [ -z "$BASTION_SSH_CIDRS" ] || [ -n "$BASTION_SSH_SG_SOURCES" ] || echo "$BASTION_SSH_CIDRS" | grep -q "0.0.0.0/0"; then
-        ALL_PASS=false
-    fi
-
-    # Check 2: SSH source restriction on internal tiers (SG-scoped only; no CIDR)
-    for SG_ID in "$WEB_SG_ID" "$API_SG_ID" "$DB_SG_ID"; do
-        local SSH_CIDRS=$(aws ec2 describe-security-groups --group-ids "$SG_ID" \
-            --query "SecurityGroups[0].IpPermissions[?FromPort==\`22\` && ToPort==\`22\`].IpRanges[].CidrIp" --output text 2>/dev/null)
-        local SSH_SG_SOURCES=$(aws ec2 describe-security-groups --group-ids "$SG_ID" \
-            --query "SecurityGroups[0].IpPermissions[?FromPort==\`22\` && ToPort==\`22\`].UserIdGroupPairs[].GroupId" --output text 2>/dev/null)
-        SSH_CIDRS=$(printf '%s' "$SSH_CIDRS" | tr -d '\r')
-        SSH_SG_SOURCES=$(printf '%s' "$SSH_SG_SOURCES" | tr -d '\r')
-
-        if [ -n "$SSH_CIDRS" ] || [ -z "$SSH_SG_SOURCES" ]; then
-            ALL_PASS=false
-        fi
-
-        if [ -n "$SSH_SG_SOURCES" ]; then
-            for SRC_SG in $SSH_SG_SOURCES; do
-                if [ "$SRC_SG" != "$BASTION_SG_ID" ]; then
-                    ALL_PASS=false
-                fi
-            done
-        fi
-    done
-
-    # Check 3: Database source restriction (API SG only, TCP/5432 only, SG-scoped)
-    local DB_CIDRS=$(aws ec2 describe-security-groups --group-ids "$DB_SG_ID" \
-        --query "SecurityGroups[0].IpPermissions[?IpProtocol=='tcp' && FromPort==\`5432\` && ToPort==\`5432\`].IpRanges[].CidrIp" --output text 2>/dev/null)
-    local DB_SG_SOURCES=$(aws ec2 describe-security-groups --group-ids "$DB_SG_ID" \
-        --query "SecurityGroups[0].IpPermissions[?IpProtocol=='tcp' && FromPort==\`5432\` && ToPort==\`5432\`].UserIdGroupPairs[].GroupId" --output text 2>/dev/null)
-    local DB_WIDE_RULES=$(aws ec2 describe-security-groups --group-ids "$DB_SG_ID" \
-        --query "SecurityGroups[0].IpPermissions[?IpProtocol=='tcp' && FromPort<=\`5432\` && ToPort>=\`5432\` && (FromPort!=\`5432\` || ToPort!=\`5432\`)]" --output text 2>/dev/null)
-    DB_CIDRS=$(printf '%s' "$DB_CIDRS" | tr -d '\r')
-    DB_SG_SOURCES=$(printf '%s' "$DB_SG_SOURCES" | tr -d '\r')
-    DB_WIDE_RULES=$(printf '%s' "$DB_WIDE_RULES" | tr -d '\r')
-
-    if [ -n "$DB_WIDE_RULES" ]; then
-        ALL_PASS=false
-    fi
-
-    if [ -n "$DB_CIDRS" ] || [ -z "$DB_SG_SOURCES" ]; then
-        ALL_PASS=false
-    fi
-
-    if [ -n "$DB_SG_SOURCES" ]; then
-        for SRC_SG in $DB_SG_SOURCES; do
-            if [ "$SRC_SG" != "$API_SG_ID" ]; then
-                ALL_PASS=false
-            fi
-        done
-    fi
-
-    # Check 4: ICMP restriction (SG-scoped only; no CIDR)
-    local ICMP_CIDRS=$(aws ec2 describe-security-groups --group-ids "$WEB_SG_ID" \
-        --query "SecurityGroups[0].IpPermissions[?IpProtocol==\`icmp\`].IpRanges[].CidrIp" --output text 2>/dev/null)
-    local ICMP_SG_SOURCES=$(aws ec2 describe-security-groups --group-ids "$WEB_SG_ID" \
-        --query "SecurityGroups[0].IpPermissions[?IpProtocol==\`icmp\`].UserIdGroupPairs[].GroupId" --output text 2>/dev/null)
-    ICMP_CIDRS=$(printf '%s' "$ICMP_CIDRS" | tr -d '\r')
-    ICMP_SG_SOURCES=$(printf '%s' "$ICMP_SG_SOURCES" | tr -d '\r')
-
-    if [ -n "$ICMP_CIDRS" ] || [ -z "$ICMP_SG_SOURCES" ]; then
-        ALL_PASS=false
-    fi
-
-    if [ -n "$ICMP_SG_SOURCES" ]; then
-        for SRC_SG in $ICMP_SG_SOURCES; do
-            if [ "$SRC_SG" != "$BASTION_SG_ID" ]; then
-                ALL_PASS=false
-            fi
-        done
-    fi
-
-    if [ "$ALL_PASS" = true ]; then
-        INC_4524="resolved"
-    else
-        INC_4524="unresolved"
-    fi
+record_incident() {
+    case "$2" in
+        0) printf -v "$1" '%s' resolved ;;
+        1) printf -v "$1" '%s' unresolved ;;
+        *) printf -v "$1" '%s' error; echo "Error: $1: $3" >&2 ;;
+    esac
 }
 
 # =============================================================================
@@ -256,18 +138,32 @@ validate_inc_4524() {
 generate_verification_token() {
     local GITHUB_USER="$1"
 
-    local TIMESTAMP=$(date +%s)
-    local COMPLETION_DATE=$(date -u +"%Y-%m-%d")
-    local COMPLETION_TIME=$(date -u +"%H:%M:%S")
+    # Get current timestamp
+    local TIMESTAMP
+    local COMPLETION_DATE
+    local COMPLETION_TIME
 
-    local VERIFICATION_SECRET=$(sha256_hex "${MASTER_SECRET}:${DEPLOYMENT_ID}")
+    TIMESTAMP=$(date +%s)
+    COMPLETION_DATE=$(date -u +"%Y-%m-%d")
+    COMPLETION_TIME=$(date -u +"%H:%M:%S")
 
-    local PAYLOAD='{"github_username":"'"$GITHUB_USER"'","date":"'"$COMPLETION_DATE"'","time":"'"$COMPLETION_TIME"'","timestamp":'"$TIMESTAMP"',"challenge":"networking-lab-aws","challenges":4,"instance_id":"'"$DEPLOYMENT_ID"'"}'
+    # Derive verification secret from master secret + instance ID
+    local VERIFICATION_SECRET
+    VERIFICATION_SECRET=$(sha256_hex "${MASTER_SECRET}:${DEPLOYMENT_ID}")
 
-    local SIGNATURE=$(echo -n "$PAYLOAD" | openssl dgst -sha256 -hmac "$VERIFICATION_SECRET" | cut -d' ' -f2)
+    # Create payload as single-line JSON
+    local PAYLOAD
+    PAYLOAD='{"github_username":"'"$GITHUB_USER"'","date":"'"$COMPLETION_DATE"'","time":"'"$COMPLETION_TIME"'","timestamp":'"$TIMESTAMP"',"challenge":"networking-lab-aws","challenges":4,"instance_id":"'"$DEPLOYMENT_ID"'"}'
 
-    local TOKEN_DATA='{"payload":'"$PAYLOAD"',"signature":"'"$SIGNATURE"'"}'
+    # Generate HMAC-SHA256 signature
+    local SIGNATURE
+    SIGNATURE=$(echo -n "$PAYLOAD" | openssl dgst -sha256 -hmac "$VERIFICATION_SECRET" | cut -d' ' -f2)
 
+    # Create final token structure
+    local TOKEN_DATA
+    TOKEN_DATA='{"payload":'"$PAYLOAD"',"signature":"'"$SIGNATURE"'"}'
+
+    # Base64 encode the token
     base64_encode_no_wrap "$TOKEN_DATA"
 }
 
@@ -314,6 +210,10 @@ show_status() {
 
     echo ""
     echo "  Resolved: $RESOLVED / $TOTAL"
+    echo "  INC-4521 ($INC_4521): $EGRESS_DETAIL"
+    echo "  INC-4522 ($INC_4522): $DNS_DETAIL"
+    echo "  INC-4523 ($INC_4523): $PORTS_DETAIL"
+    echo "  INC-4524 ($INC_4524): $HARDENING_DETAIL"
     echo ""
 
     if [ $RESOLVED -eq $TOTAL ]; then
@@ -325,16 +225,24 @@ show_status() {
         echo "  your completion token."
         echo ""
     fi
+    if [[ " $INC_4521 $INC_4522 $INC_4523 $INC_4524 " == *" error "* ]]; then return 2; fi
+    [ "$RESOLVED" -eq "$TOTAL" ]
 }
 
 export_token() {
-    preflight_check > /dev/null 2>&1
+    preflight_check
 
-    validate_inc_4521 > /dev/null 2>&1
-    validate_inc_4522 > /dev/null 2>&1
-    validate_inc_4523 > /dev/null 2>&1
-    validate_inc_4524 > /dev/null 2>&1
+    # Run all validations
+    validate_inc_4521
+    validate_inc_4522
+    validate_inc_4523
+    validate_inc_4524
+    if [[ " $INC_4521 $INC_4522 $INC_4523 $INC_4524 " == *" error "* ]]; then
+        echo "Error: Validation could not complete; no token was generated." >&2
+        exit 2
+    fi
 
+    # Check if all resolved
     local RESOLVED=0
     [ "$INC_4521" == "resolved" ] && RESOLVED=$((RESOLVED + 1))
     [ "$INC_4522" == "resolved" ] && RESOLVED=$((RESOLVED + 1))
@@ -352,6 +260,7 @@ export_token() {
     echo -e "${GREEN}============================================${NC}"
     echo ""
 
+    # Get GitHub username
     echo "Enter your GitHub username (must match your learntocloud.guide account):"
     echo -n "> "
     read GITHUB_USER
@@ -365,7 +274,9 @@ export_token() {
     echo "Generating completion token..."
     echo ""
 
-    local TOKEN=$(generate_verification_token "$GITHUB_USER")
+    # Generate the token
+    local TOKEN
+    TOKEN=$(generate_verification_token "$GITHUB_USER")
 
     echo -e "${GREEN}Your completion token:${NC}"
     echo ""
@@ -395,24 +306,36 @@ verify_token() {
     echo "Verifying token..."
     echo ""
 
-    local DECODED=$(echo "$TOKEN" | base64_decode_stdin 2>/dev/null)
+    # Decode the token
+    local DECODED
+    DECODED=$(echo "$TOKEN" | base64_decode_stdin 2>/dev/null)
 
     if [ -z "$DECODED" ]; then
         echo -e "${RED}Error: Invalid token format.${NC}"
         exit 1
     fi
 
-    local PAYLOAD=$(echo "$DECODED" | jq -c '.payload' 2>/dev/null)
-    local PROVIDED_SIG=$(echo "$DECODED" | jq -r '.signature' 2>/dev/null)
-    local INSTANCE_ID=$(echo "$DECODED" | jq -r '.payload.instance_id' 2>/dev/null)
+    # Extract payload as compact JSON
+    local PAYLOAD
+    local PROVIDED_SIG
+    local INSTANCE_ID
+
+    PAYLOAD=$(echo "$DECODED" | jq -c '.payload' 2>/dev/null)
+    PROVIDED_SIG=$(echo "$DECODED" | jq -r '.signature' 2>/dev/null)
+    INSTANCE_ID=$(echo "$DECODED" | jq -r '.payload.instance_id' 2>/dev/null)
 
     if [ -z "$PAYLOAD" ] || [ "$PAYLOAD" == "null" ] || [ -z "$PROVIDED_SIG" ] || [ -z "$INSTANCE_ID" ]; then
         echo -e "${RED}Error: Could not parse token.${NC}"
         exit 1
     fi
 
-    local VERIFICATION_SECRET=$(sha256_hex "${MASTER_SECRET}:${INSTANCE_ID}")
-    local EXPECTED_SIG=$(echo -n "$PAYLOAD" | openssl dgst -sha256 -hmac "$VERIFICATION_SECRET" | cut -d' ' -f2)
+    # Derive verification secret
+    local VERIFICATION_SECRET
+    VERIFICATION_SECRET=$(sha256_hex "${MASTER_SECRET}:${INSTANCE_ID}")
+
+    # Regenerate signature over the exact payload string
+    local EXPECTED_SIG
+    EXPECTED_SIG=$(echo -n "$PAYLOAD" | openssl dgst -sha256 -hmac "$VERIFICATION_SECRET" | cut -d' ' -f2)
 
     if [ "$PROVIDED_SIG" == "$EXPECTED_SIG" ]; then
         echo -e "${GREEN}✓ Token is VALID${NC}"
@@ -476,4 +399,6 @@ main() {
     echo ""
 }
 
-main "$@"
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+    main "$@"
+fi

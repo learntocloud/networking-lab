@@ -29,3 +29,27 @@ output "api_sg_id" {
 output "db_sg_id" {
   value = aws_security_group.database.id
 }
+
+output "public_route_table_id" {
+  value = aws_route_table.public.id
+}
+
+output "private_route_table_id" {
+  value = aws_route_table.private.id
+}
+
+output "database_route_table_id" {
+  value = aws_route_table.database.id
+}
+
+output "nat_gateway_id" {
+  value = aws_nat_gateway.main.id
+}
+
+output "internet_gateway_id" {
+  value = aws_internet_gateway.main.id
+}
+
+output "database_network_acl_id" {
+  value = aws_network_acl.database.id
+}

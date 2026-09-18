@@ -24,15 +24,34 @@ resource "random_id" "deployment" {
   byte_length = 4
 }
 
+# Looked up here rather than inside the compute module: the compute module
+# depends on the whole network module, and a data source inside it would be
+# deferred (and force instance replacement) on every re-run. Existing instances
+# ignore later AMI changes (see the compute module's lifecycle blocks).
+data "aws_ami" "ubuntu" {
+  most_recent = true
+  owners      = ["099720109477"]
+
+  filter {
+    name   = "name"
+    values = ["ubuntu/images/hvm-ssd/ubuntu-jammy-22.04-amd64-server-*"]
+  }
+
+  filter {
+    name   = "virtualization-type"
+    values = ["hvm"]
+  }
+}
+
 module "network" {
   source = "./modules/network"
 
-  deployment_id       = random_id.deployment.hex
-  vpc_cidr            = var.vpc_cidr
-  public_subnet_cidr  = var.public_subnet_cidr
-  private_subnet_cidr = var.private_subnet_cidr
+  deployment_id        = random_id.deployment.hex
+  vpc_cidr             = var.vpc_cidr
+  public_subnet_cidr   = var.public_subnet_cidr
+  private_subnet_cidr  = var.private_subnet_cidr
   database_subnet_cidr = var.database_subnet_cidr
-  aws_region          = var.aws_region
+  aws_region           = var.aws_region
 }
 
 module "dns" {
@@ -46,20 +65,25 @@ module "dns" {
 }
 
 module "compute" {
+  # cloud-init installs packages through the NAT gateway, so wait for the
+  # complete network module (including the NAT route) before launching.
+  depends_on = [module.network]
+
   source = "./modules/compute"
 
-  deployment_id       = random_id.deployment.hex
-  aws_region          = var.aws_region
-  admin_username      = var.admin_username
+  ami_id         = data.aws_ami.ubuntu.id
+  deployment_id  = random_id.deployment.hex
+  aws_region     = var.aws_region
+  admin_username = var.admin_username
 
-  public_subnet_id    = module.network.public_subnet_id
-  private_subnet_id   = module.network.private_subnet_id
-  database_subnet_id  = module.network.database_subnet_id
+  public_subnet_id   = module.network.public_subnet_id
+  private_subnet_id  = module.network.private_subnet_id
+  database_subnet_id = module.network.database_subnet_id
 
-  bastion_sg_id       = module.network.bastion_sg_id
-  web_sg_id           = module.network.web_sg_id
-  api_sg_id           = module.network.api_sg_id
-  db_sg_id            = module.network.db_sg_id
+  bastion_sg_id = module.network.bastion_sg_id
+  web_sg_id     = module.network.web_sg_id
+  api_sg_id     = module.network.api_sg_id
+  db_sg_id      = module.network.db_sg_id
 
-  vpc_id              = module.network.vpc_id
+  vpc_id = module.network.vpc_id
 }

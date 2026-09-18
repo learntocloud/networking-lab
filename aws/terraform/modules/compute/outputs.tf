@@ -26,3 +26,19 @@ output "ssh_private_key" {
   value     = tls_private_key.ssh.private_key_pem
   sensitive = true
 }
+
+output "bastion_instance_id" {
+  value = aws_instance.bastion.id
+}
+
+output "web_instance_id" {
+  value = aws_instance.web.id
+}
+
+output "api_instance_id" {
+  value = aws_instance.api.id
+}
+
+output "db_instance_id" {
+  value = aws_instance.database.id
+}
