@@ -1,85 +1,123 @@
 ---
 name: review-lab-maintenance
-description: Review networking lab maintenance across AWS, Azure, and GCP. Use when asked to assess Terraform and provider compatibility, cloud CLI changes, dependencies, image lifecycle, or lab documentation drift. Produce an evidence-backed maintainer report without modifying files or cloud resources.
+description: Check the networking lab for version and deprecation drift across AWS, Azure, and GCP. Use when asked whether Terraform, providers, cloud CLI commands, base VM images, instance types, or Python/package assumptions need upgrading. Produce a short evidence-backed drift report without modifying files or cloud resources.
 ---
 
 # Review Lab Maintenance
 
-Review the lab for changes maintainers should investigate, not for ways to solve
-the student exercises. Default to all three clouds unless the user narrows scope.
+Answer one question: **does anything pinned or assumed in this repository need to
+be upgraded or changed?** Cover Terraform and providers, cloud CLI usage, base VM
+images, instance types, and Python and package assumptions. Default to all three
+clouds unless the user narrows scope.
+
+This is a drift check, not an audit. Whether the lab's intentional
+misconfigurations are correct, whether validation tests the right acceptance
+criteria, and whether the guides match the implementation are out of scope —
+those need a live, separately authorized run of the lab.
 
 ## Guardrails
 
-- Report only. Do not edit files, upgrade or install dependencies, deploy or
-  destroy infrastructure, change cloud resources, or create issues or PRs.
-- Do not run setup, validation, destroy, bootstrap, or solution scripts. Inspect
-  them as source; live verification requires a separately authorized task.
-- Do not run Terraform init, plan, apply, or destroy, or authenticate to cloud
-  accounts as part of this review. Keep checks local and non-mutating.
-- Preserve intentional misconfigurations. Establish each incident's intended
-  fault from the guides and implementation before flagging it as a problem.
-  An unclear boundary is a question to investigate, not an instruction to fix it.
+- Report only. Do not edit files, upgrade dependencies, run Terraform
+  (`init`/`plan`/`apply`/`destroy`), authenticate to any cloud, or run the
+  setup, validate, or destroy scripts. Read them as source.
+- Do not recommend an upgrade merely because a newer version exists. Every
+  recommendation needs a concrete reason: a breaking change already admitted by
+  the version constraint, a removed or deprecated CLI command or flag, an
+  end-of-support date, or a fixed bug that affects this lab.
+- The lab ships deliberate network faults. Never flag a misconfiguration as
+  drift, and do not reproduce fixes or solution commands from the `scripts/`
+  directories.
 - Do not inspect or disclose credentials, private keys, Terraform state, or
-  generated tokens. Use public documentation queries without repository secrets
-  or private code.
-- Do not recommend an upgrade merely because a newer version exists. Explain
-  the concrete compatibility, support, reliability, or student-experience benefit.
+  generated completion tokens.
 
-## Review Process
+## Step 1 — Read the current pins
 
-1. Read the root `README.md`, `CONTRIBUTING.md`, and the selected providers'
-   `README.md` files.
-   Identify prerequisites, incident requirements, and the documented student
-   journey. Use repository-relative paths, never machine-specific paths.
-2. Inventory the selected providers' `terraform/` and `scripts/` directories,
-   including modules, VM bootstrap templates, and shared helpers in `scripts/`.
-   Record declared version constraints and dependency sources. Distinguish
-   declared versions, unpinned dependencies, and versions that cannot be determined;
-   do not assume an installed local tool represents a student's environment.
-3. Review the areas below against the actual implementation. Follow shared
-   helpers and callers so a finding is not based on an isolated line.
-4. Verify time-sensitive claims against current official documentation, release
-   notes, migration guides, or lifecycle notices. Check applicability to the
-   repository's version constraints, cloud, and configuration. Cite source URLs,
-   relevant release or retirement dates, and the date checked. If sources are
-   unavailable or inconclusive, disclose the gap instead of asserting a change.
-5. Return the report in the conversation. Do not create a report file unless
-   requested. Separate static evidence from behavior requiring live verification.
+Read every surface below and record the literal pin you find. This table is a map
+of where pins live, not a record of their values; read the current value each
+time. Line numbers drift, so search for the field rather than jumping to a line.
 
-## Review Areas
+A surface that turns out to be unpinned, or a provider used by a resource but
+never declared in `required_providers`, is itself worth reporting.
 
-| Area | Inspect |
-|------|---------|
-| Terraform | Terraform/provider constraints, deprecated resources and arguments, breaking changes applicable to allowed versions, module wiring, deployment and teardown assumptions. |
-| Cloud CLIs | Commands and flags used by scripts and guides, authentication prerequisites, output parsing, pagination, exit handling, and documented CLI changes that affect these uses. |
-| Dependencies | Local tools, VM image and OS support, package repositories, bootstrap packages and downloads, architecture assumptions, and reproducibility of unpinned dependencies. |
-| Lab behavior | Whether setup prepares the documented faults, validation tests the actual acceptance criteria, incidents interact as intended, and teardown accounts for resources created while solving the lab. |
-| Documentation | Whether prerequisites, commands, paths, expected results, and cleanup guidance agree with implementation. Compare clouds for unintended drift without requiring identical provider-specific designs. |
+| Surface | What to read |
+|---------|--------------|
+| Terraform core | `required_version` in the `terraform` block of `aws/`, `azure/`, and `gcp/terraform/main.tf` — note that the three clouds pin different floors |
+| Providers | every entry in `required_providers` in each `terraform/main.tf` (`aws`, `azurerm`, `google`, plus `random` and `tls`), and any provider referenced by a resource but not declared |
+| Base image (AWS) | the `name` filter and `owners` on the `aws_ami` data source in `aws/terraform/main.tf` |
+| Base image (Azure) | `source_image_reference` publisher, offer, sku, and version on every VM in `azure/terraform/modules/compute/main.tf` |
+| Base image (GCP) | the image family in `gcp/terraform/modules/compute/main.tf` |
+| Instance types | `instance_type` (AWS), `size` (Azure), and `machine_type` (GCP) in each compute module, including whether they are still current-generation and free-tier eligible |
+| Bootstrap packages | every `apt-get install` package list in `*/terraform/modules/compute/templates/*-init.sh`, plus anything downloaded or installed from outside the distro repositories |
+| Python assumptions | the `python3` version floor stated in each provider `README.md`, and whether `*/scripts/*-policy.py` uses only the standard library |
+| Local tool prerequisites | the tools asserted by `require_commands` in `*/scripts/setup.sh`, `validate.sh`, and `common.sh`, compared against what each `README.md` lists under Prerequisites |
+| CI | `uses:` refs in `.github/workflows/*.yml` if any workflows exist, and whether they are SHA-pinned |
 
-For lab behavior, trace setup through Terraform and bootstrap to validation and
-cleanup. Do not treat Terraform alone as the setup workflow when provider scripts
-perform additional preparation. A successful static check does not prove that
-deployment, connectivity, completion-token generation, or cleanup works.
+Also collect every `aws`, `az`, and `gcloud` invocation from the provider
+`README.md` files, `*/scripts/*.sh`, and `*/scripts/*-policy.py`. These are the
+commands a student or the validator actually runs.
+
+## Step 2 — Look up current versions
+
+Use deterministic sources, not recollection. Record the date checked.
+
+```bash
+# Terraform core
+gh api repos/hashicorp/terraform/releases/latest --jq .tag_name
+
+# Providers (substitute each provider source found in Step 1)
+curl -s https://registry.terraform.io/v1/providers/hashicorp/aws | jq -r .version
+```
+
+For anything without an API, use the official changelog or lifecycle page: the
+provider `CHANGELOG.md` on GitHub, the Ubuntu release cycle page for whichever
+LTS the images pin, and the AWS CLI, Azure CLI, and gcloud release notes for
+removed or deprecated commands, flags, and output fields.
+
+## Step 3 — Decide whether the gap matters
+
+For each surface where the pin trails current, check whether the delta actually
+affects this lab:
+
+- **Terraform and providers:** does the allowed range already admit the new
+  version? A `~>` or `>=` constraint that silently picks up a release with
+  breaking changes is more urgent than a trailing lower bound. Check the provider
+  changelog for breaking changes, removed arguments, and deprecations touching
+  the resources this repo declares — VPCs and VNets, subnets, route tables,
+  security groups, NSGs, firewall rules, private DNS zones, and VM resources.
+- **Cloud CLIs:** has a command, subcommand, flag, or JSON output field used by
+  the scripts or READMEs been removed, renamed, or deprecated? The policy scripts
+  parse CLI JSON, so a changed output shape breaks validation silently. An
+  unchanged command is a non-finding.
+- **Base images and instance types:** is the pinned Ubuntu LTS still in standard
+  support, do the image name filters and families still resolve, and are the
+  instance types still offered in the default regions? Note upcoming
+  end-of-support and retirement dates.
+- **Bootstrap packages:** do the installed packages still exist under those names
+  in the pinned Ubuntu release, and does anything fetched from outside the distro
+  repositories still resolve?
+- **Python:** is the documented `python3` floor still supported upstream, and do
+  the policy scripts still rely only on the standard library?
+
+Anything you cannot determine is a coverage gap, not a finding.
 
 ## Report Format
 
-Start with the review date, scope, and a short overall assessment. Then provide
-only actionable findings, ordered by student impact and urgency:
+Open with the date checked and a one-line verdict. **If nothing needs changing,
+say so and stop** — do not pad the table.
 
-| Priority | Evidence status | Cloud | Finding and student impact | Repository evidence | Official source | Suggested action |
-|----------|-----------------|-------|----------------------------|---------------------|-----------------|------------------|
+Then one row per surface that needs action:
 
-- **Priority:** High for likely blockers or imminent support deadlines; Medium
-  for credible reliability or maintenance risks; Low for minor documentation or
-  maintainability issues. Explain the priority rather than relying on the label.
-- **Evidence status:** Confirmed problem, upcoming lifecycle risk, or needs live
-  verification. Use confirmed only when the available evidence establishes it.
-- **Evidence:** Cite repository `path:line` references and applicable official
-  URLs with dates. For purely internal inconsistencies, mark the official source
-  as not applicable. Separate observed facts from inferred impact.
-- **Suggested action:** Give a bounded next step and how a maintainer could
-  verify it. Do not silently turn the recommendation into an implementation.
+| Priority | Cloud | Surface | Current pin | Current release | Why it matters | Evidence | Suggested action |
+|----------|-------|---------|-------------|-----------------|----------------|----------|------------------|
 
-Finish with coverage gaps: areas not reviewed, unavailable sources or tools, and
-specific checks requiring an authorized live lab. If there are no actionable
-findings, say so; do not invent recommendations to fill the table.
+- **Priority:** High for a breaking change already admitted by the constraint, a
+  removed CLI command or changed output field, or a support deadline inside 6
+  months. Medium for a trailing pin with a concrete benefit. Low for cosmetic or
+  maintainability drift.
+- **Evidence:** repository `path:line` plus the official URL and its date.
+  Separate observed facts from inferred impact.
+- **Suggested action:** the bounded edit, and how to verify it — typically a
+  `terraform plan` or a full deploy-and-validate run, neither of which this skill
+  performs.
+
+Close with anything you could not check and why.
