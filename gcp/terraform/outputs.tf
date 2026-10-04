@@ -62,7 +62,7 @@ output "connection_instructions" {
     NETWORKING LAB - CONNECTION INFO
     ============================================
 
-    1. Save the SSH key (run from gcp/terraform directory):
+    1. Save the SSH key (setup.sh already did this):
        cd gcp/terraform
        terraform output -raw ssh_private_key > ~/.ssh/netlab-key
        chmod 600 ~/.ssh/netlab-key

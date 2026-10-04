@@ -105,17 +105,17 @@ PYPROBE
 probe_api_https() {
     local RESPONSE STATUS
     if RESPONSE=$(run_on_vm "$API_IP" \
-        'curl -4 --noproxy "*" -fsSL --max-redirs 3 --connect-timeout 5 --max-time 10 --retry 2 --retry-all-errors --retry-delay 2 --retry-max-time 35 -o /dev/null -w "%{http_code}" https://example.com' 50); then
+        'curl -4 --noproxy "*" -fsL --max-redirs 3 --connect-timeout 5 --max-time 10 --retry 2 --retry-all-errors --retry-delay 2 --retry-max-time 35 -o /dev/null -w "%{http_code}" https://example.com' 50); then
         if [[ "$RESPONSE" == 2[0-9][0-9] ]]; then return 0; fi
         EGRESS_DETAIL="External HTTPS returned unexpected status $RESPONSE."
         return 2
     else
         STATUS=$?
     fi
-    EGRESS_DETAIL="API external HTTPS failed (exit $STATUS)."
     case "$STATUS" in
-        7|28) return 1 ;;
-        *) EGRESS_DETAIL+=" Check SSH, tools, public DNS, TLS, and the external endpoint."; return 2 ;;
+        7) EGRESS_DETAIL="The API server cannot connect to https://example.com (connection failed)."; return 1 ;;
+        28) EGRESS_DETAIL="The API server cannot connect to https://example.com (connection timed out)."; return 1 ;;
+        *) EGRESS_DETAIL="API external HTTPS check failed (exit $STATUS). Check SSH, tools, public DNS, TLS, and the external endpoint."; return 2 ;;
     esac
 }
 
@@ -135,7 +135,7 @@ effective_route_table() {
 }
 
 check_api_egress() {
-    local ENI SUBNET_ID TABLE TABLE_ID ROUTE NAT_ID NAT NAT_IPS OUTBOUND_IP
+    local ENI SUBNET_ID TABLE ROUTE NAT_ID NAT NAT_IPS OUTBOUND_IP
     EGRESS_DETAIL=""
     if ! check_vm_tools "$API_IP"; then
         EGRESS_DETAIL="Cannot reach the API over SSH or diagnostic tools are missing."
@@ -156,26 +156,20 @@ check_api_egress() {
         EGRESS_DETAIL="The API must stay private; a public IP is not a NAT gateway repair."
         return 1
     fi
+    # Live symptom first; config checks below only reject workarounds.
+    probe_api_https || return $?
     SUBNET_ID=$(jq -r '.[0].SubnetId' <<< "$ENI")
     if ! TABLE=$(effective_route_table "$SUBNET_ID"); then
         EGRESS_DETAIL="Cannot determine the route table that applies to the API subnet."
         return 2
     fi
-    TABLE_ID=$(jq -r '.RouteTableId' <<< "$TABLE")
     ROUTE=$(jq -c '[.Routes[] | select(.DestinationCidrBlock == "0.0.0.0/0")] | .[0]' <<< "$TABLE")
-    if [ "$ROUTE" = null ]; then
-        EGRESS_DETAIL="Route table $TABLE_ID for the API subnet has no 0.0.0.0/0 route."
-        return 1
-    fi
-    if [ "$(jq -r '.State' <<< "$ROUTE")" != active ]; then
-        EGRESS_DETAIL="The API subnet's 0.0.0.0/0 route in $TABLE_ID is not active (blackhole)."
+    if [ "$ROUTE" = null ] || [ "$(jq -r '.State' <<< "$ROUTE")" != active ] ||
+        [ -z "$(jq -r '.NatGatewayId // empty' <<< "$ROUTE")" ]; then
+        EGRESS_DETAIL="External HTTPS works, but not through the lab's NAT gateway; the API must stay private."
         return 1
     fi
     NAT_ID=$(jq -r '.NatGatewayId // empty' <<< "$ROUTE")
-    if [ -z "$NAT_ID" ]; then
-        EGRESS_DETAIL="The API subnet's 0.0.0.0/0 route in $TABLE_ID does not target a NAT gateway; the API must stay private."
-        return 1
-    fi
     if ! NAT=$(aws_json ec2 describe-nat-gateways \
         --filter "Name=nat-gateway-id,Values=$NAT_ID" --query 'NatGateways[0]'); then
         EGRESS_DETAIL="Cannot read NAT gateway $NAT_ID from AWS."
@@ -195,7 +189,6 @@ check_api_egress() {
         EGRESS_DETAIL="NAT gateway $NAT_ID has no public IPv4 address."
         return 1
     fi
-    probe_api_https || return $?
     if ! OUTBOUND_IP=$(run_on_vm "$API_IP" \
         'curl -4 --noproxy "*" -fsS --connect-timeout 5 --max-time 10 --retry 2 --retry-all-errors --retry-delay 2 --retry-max-time 35 https://api.ipify.org' 50); then
         EGRESS_DETAIL="Could not obtain the API outbound IP from api.ipify.org."
@@ -211,7 +204,7 @@ check_api_egress() {
 probe_api_health() {
     local SOURCE="$1" TARGET="$2" RESPONSE STATUS
     if RESPONSE=$(run_on_vm "$SOURCE" \
-        "curl --noproxy '*' -fsS --connect-timeout 3 --max-time 5 http://$TARGET:8080/health" 15); then
+        "curl --noproxy '*' -fs --connect-timeout 3 --max-time 5 http://$TARGET:8080/health" 15); then
         if jq -se 'length == 1 and (.[0] | type == "object" and .status == "healthy")' \
             <<< "$RESPONSE" >/dev/null 2>&1; then
             SERVICE_DETAIL="API health on $TARGET:8080 is healthy."

@@ -157,16 +157,6 @@ output "connection_instructions" {
     4. Test the public web endpoint from your machine:
        curl -I http://${module.compute.web_public_ip}
 
-    Useful IDs for the AWS CLI:
-       Private route table:  ${module.network.private_route_table_id}
-       NAT gateway:          ${module.network.nat_gateway_id}
-       Database network ACL: ${module.network.database_network_acl_id}
-       Route 53 zone:        ${module.dns.dns_zone_id}
-       Security groups:      bastion ${module.network.bastion_sg_id}
-                             web     ${module.network.web_sg_id}
-                             api     ${module.network.api_sg_id}
-                             db      ${module.network.db_sg_id}
-
     ============================================
   EOT
 }

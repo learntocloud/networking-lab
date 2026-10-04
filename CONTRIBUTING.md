@@ -26,7 +26,7 @@ relative to the repository root.
 | `<cloud>/terraform/modules/compute/templates/bastion-init.sh` | Bootstraps the jump host with SSH access, diagnostic tools, and learner-facing connection hints. |
 | `<cloud>/terraform/modules/compute/templates/web-init.sh` | Configures the nginx web service, HTTP/HTTPS, a self-signed certificate, and diagnostic tools. |
 | `<cloud>/terraform/modules/compute/templates/api-init.sh` | Creates the sample API application and its systemd service. The implementation differs by provider. |
-| `<cloud>/terraform/modules/compute/templates/database-init.sh` | Configures the database-side service: PostgreSQL on Azure/GCP, and a lightweight database listener on AWS. |
+| `<cloud>/terraform/modules/compute/templates/database-init.sh` | Configures the database-side service: PostgreSQL on all clouds. |
 
 ### Provider-Specific Files
 
@@ -59,6 +59,11 @@ teach unsafe shortcuts just to make a check pass.
 Keep changes focused and update the relevant provider guide when behavior,
 prerequisites, commands, or expected results change. Explain provider-specific
 differences rather than forcing all clouds to work identically.
+
+Every provider ships the same four incidents with the same symptoms and pass
+checks; root causes may differ where a provider cannot express the same fault.
+Known difference: INC-4522 has an additional planted fault on Azure that AWS
+Route 53 cannot express (see the `INC-4522` comments in Terraform).
 
 Provider READMEs are a lab, not curriculum. Incidents state symptoms, required
 outcomes, and pass checks only. Do not add concept explanations, hints, or

@@ -188,7 +188,7 @@ These checks use private IPs; the API's `/db-check` endpoint also needs INC-4522
 > "Our quarterly security scan flagged several issues with the network segmentation:
 > 
 > 1. SSH rules are too broad. Restrict bastion SSH to your current public IPv4 address (`/32`), and web, API, and database SSH to the bastion subnet.
-> 2. Database access on TCP 5432 should be restricted to the API subnet (`10.0.2.0/24`).
+> 2. Database accepts connections on port 5432 from too broad a range — it should only accept connections from the API subnet (10.0.2.0/24)
 > 3. ICMP is open from anywhere on the web server — it should only be allowed from the bastion subnet
 > 
 > These need to be tightened up before our compliance review next week."

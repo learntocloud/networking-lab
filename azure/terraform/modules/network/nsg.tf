@@ -135,6 +135,7 @@ resource "azurerm_network_security_group" "database" {
   resource_group_name = var.resource_group_name
   location            = var.location
 
+  # INC-4524: Database access too broad.
   security_rule {
     name                       = "postgres-access"
     priority                   = 100
@@ -143,7 +144,7 @@ resource "azurerm_network_security_group" "database" {
     protocol                   = "Tcp"
     source_port_range          = "*"
     destination_port_range     = "5432"
-    source_address_prefix      = "10.0.2.0/24"
+    source_address_prefix      = "*"
     destination_address_prefix = "*"
   }
 

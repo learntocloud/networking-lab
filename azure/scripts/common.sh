@@ -43,16 +43,17 @@ load_lab_outputs() {
 run_on_vm() {
     local TARGET_IP="$1"
     local COMMAND PROXY
-    local -a HOP=()
+    # Never empty: bash 3.2 (macOS) treats "${EMPTY[@]}" as unbound under set -u.
+    local -a HOP=("${SSH_OPTS[@]}" -i "$SSH_KEY")
     printf -v COMMAND '%q' "$2"
 
     if [ "$TARGET_IP" != "$BASTION_IP" ]; then
         printf -v PROXY '%q ' ssh "${SSH_OPTS[@]}" -i "$SSH_KEY" \
             -W '%h:%p' labadmin@"$BASTION_IP"
-        HOP=(-o "ProxyCommand=$PROXY")
+        HOP+=(-o "ProxyCommand=$PROXY")
     fi
 
-    ssh -n "${SSH_OPTS[@]}" -i "$SSH_KEY" "${HOP[@]}" labadmin@"$TARGET_IP" \
+    ssh -n "${HOP[@]}" labadmin@"$TARGET_IP" \
         "timeout ${3:-60} bash -o pipefail -c $COMMAND"
 }
 
@@ -71,7 +72,7 @@ check_vm_tools() {
 probe_api_https() {
     local STATUS CODE
     if STATUS=$(run_on_vm "$API_IP" \
-        'curl -4 --noproxy "*" -sS -f -L --max-redirs 3 --connect-timeout 5 --max-time 10 --retry 2 --retry-all-errors --retry-delay 2 --retry-max-time 35 -o /dev/null -w "%{http_code}" https://example.com' 50); then
+        'curl -4 --noproxy "*" -s -f -L --max-redirs 3 --connect-timeout 5 --max-time 10 --retry 2 --retry-all-errors --retry-delay 2 --retry-max-time 35 -o /dev/null -w "%{http_code}" https://example.com' 50); then
         if [[ "$STATUS" == 2[0-9][0-9] ]]; then
             return 0
         fi
@@ -82,8 +83,12 @@ probe_api_https() {
     fi
 
     case "$CODE" in
-        7|28)
-            EGRESS_DETAIL="The API cannot connect to the external HTTPS endpoint (curl exit $CODE)."
+        7)
+            EGRESS_DETAIL="The API server cannot connect to https://example.com (connection failed)."
+            return 1
+            ;;
+        28)
+            EGRESS_DETAIL="The API server cannot connect to https://example.com (connection timed out)."
             return 1
             ;;
         *)
@@ -102,6 +107,12 @@ check_api_egress() {
         EGRESS_DETAIL="Cannot reach the API over SSH or required diagnostic tools are missing."
         return 2
     fi
+    # Live symptom first; config checks below only reject workarounds.
+    if probe_api_https; then
+        :
+    else
+        return $?
+    fi
     if ! SUBNET_ID=$(az network nic show -g "$RESOURCE_GROUP" \
         -n "nic-api-$DEPLOYMENT_ID" --query 'ipConfigurations[0].subnet.id' -o tsv) ||
         [ -z "$SUBNET_ID" ]; then
@@ -114,7 +125,7 @@ check_api_egress() {
         return 2
     fi
     if [ -z "$NAT_ID" ]; then
-        EGRESS_DETAIL="The API subnet has no NAT gateway association."
+        EGRESS_DETAIL="External HTTPS works, but not through the lab's NAT gateway."
         return 1
     fi
     if ! NAT=$(az network nat gateway show --ids "$NAT_ID" -o json) ||
@@ -145,11 +156,6 @@ check_api_egress() {
         return 1
     fi
 
-    if probe_api_https; then
-        :
-    else
-        return $?
-    fi
     if ! OUTBOUND_IP=$(run_on_vm "$API_IP" \
         'curl -4 --noproxy "*" -fsS --connect-timeout 5 --max-time 10 --retry 2 --retry-all-errors --retry-delay 2 --retry-max-time 35 https://api.ipify.org' 50); then
         EGRESS_DETAIL="Could not obtain the API outbound IP from api.ipify.org; NAT egress could not be verified."
@@ -183,7 +189,7 @@ sys.exit(0 if any(address in network for network in networks) else 1)' \
 probe_api_health() {
     local SOURCE_IP="$1" TARGET_IP="$2" RESPONSE STATUS
     if RESPONSE=$(run_on_vm "$SOURCE_IP" \
-        "curl --noproxy '*' -fsS --connect-timeout 3 --max-time 5 http://$TARGET_IP:8080/health" 15); then
+        "curl --noproxy '*' -fs --connect-timeout 3 --max-time 5 http://$TARGET_IP:8080/health" 15); then
         if jq -se 'length == 1 and (.[0] | type == "object" and .status == "healthy")' \
             <<< "$RESPONSE" >/dev/null 2>&1; then
             SERVICE_DETAIL="The API health endpoint on $TARGET_IP:8080 is healthy."

@@ -85,8 +85,6 @@ if [ -n "$PROJECT_ID" ] && [ -n "$DEPLOYMENT_ID" ] && command -v gcloud >/dev/nu
         echo "Deleting leftover firewall rule: $RULE"
         gcloud compute firewall-rules delete "$RULE" --project "$PROJECT_ID" -q 2>/dev/null || true
     done
-else
-    echo "DEBUG: Skipped firewall cleanup (PROJECT_ID='${PROJECT_ID}', DEPLOYMENT_ID='${DEPLOYMENT_ID}')"
 fi
 
 # Remove Cloud DNS records so the managed zone can be deleted
