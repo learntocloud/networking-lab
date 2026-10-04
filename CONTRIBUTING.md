@@ -60,6 +60,10 @@ Keep changes focused and update the relevant provider guide when behavior,
 prerequisites, commands, or expected results change. Explain provider-specific
 differences rather than forcing all clouds to work identically.
 
+Provider READMEs are a lab, not curriculum. Incidents state symptoms, required
+outcomes, and pass checks only. Do not add concept explanations, hints, or
+lists of resources to inspect or fix.
+
 ## Manual Testing Is Required Before Opening a PR
 
 **Every contribution must be manually tested before opening a pull request.**
