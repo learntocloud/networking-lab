@@ -87,8 +87,8 @@ resolve the reported error and retry, or run `./destroy.sh` to avoid charges.
 
 This lab has **two separate activities**:
 
-- **Diagnose via SSH** — The setup script gives you an SSH command to connect through the bastion host. Use it to hop into VMs and check what's broken (test connectivity, resolve DNS, curl endpoints, etc.).
-- **Fix via Azure CLI** — Once you know the root cause, open a separate terminal on your **local machine** and fix the misconfigured cloud resources using `az` commands (e.g., fix NSG rules, route tables, DNS records).
+- **Diagnose via SSH** — The setup script gives you an SSH command to connect through the bastion host. Use it to hop into VMs and check what's broken.
+- **Fix via Azure CLI** — Once you know the root cause, open a separate terminal on your **local machine** and fix the misconfigured cloud resources using `az` commands.
 
 Do **not** edit Terraform files to fix issues. Do **not** try to fix things from inside the VMs. The cloud infrastructure is what's broken — fix it with the cloud CLI.
 
@@ -188,7 +188,7 @@ These checks use private IPs; the API's `/db-check` endpoint also needs INC-4522
 > "Our quarterly security scan flagged several issues with the network segmentation:
 > 
 > 1. SSH rules are too broad. Restrict bastion SSH to your current public IPv4 address (`/32`), and web, API, and database SSH to the bastion subnet.
-> 2. Database access on TCP 5432 should be restricted to the API subnet (`10.0.2.0/24`).
+> 2. Database accepts connections on port 5432 from too broad a range — it should only accept connections from the API subnet (10.0.2.0/24)
 > 3. ICMP is open from anywhere on the web server — it should only be allowed from the bastion subnet
 > 
 > These need to be tightened up before our compliance review next week."
@@ -218,10 +218,10 @@ The web HTTPS check uses `-k` because the lab certificate is self-signed.
 ## Verify Your Fixes
 
 The commands above are spot checks. Use `./validate.sh` as the final acceptance
-check: it checks cloud configuration and live traffic, including effective NSG
-rules, for the lab's single-NIC IPv4 topology.
+check: it checks cloud configuration and live traffic for the lab's single-NIC
+IPv4 topology.
 
-Allow DNS and NSG changes to propagate before retrying. Validation requires SSH
+Allow changes to propagate before retrying. Validation requires SSH
 access and working diagnostic tools; NAT checks also use `example.com` and
 `api.ipify.org`.
 

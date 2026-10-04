@@ -71,17 +71,17 @@ check_vm_tools() {
 probe_api_https() {
     local RESPONSE STATUS
     if RESPONSE=$(run_on_vm "$API_IP" \
-        'curl -4 --noproxy "*" -fsSL --max-redirs 3 --connect-timeout 5 --max-time 10 --retry 2 --retry-all-errors --retry-delay 2 --retry-max-time 35 -o /dev/null -w "%{http_code}" https://example.com' 50); then
+        'curl -4 --noproxy "*" -fsL --max-redirs 3 --connect-timeout 5 --max-time 10 --retry 2 --retry-all-errors --retry-delay 2 --retry-max-time 35 -o /dev/null -w "%{http_code}" https://example.com' 50); then
         if [[ "$RESPONSE" == 2[0-9][0-9] ]]; then return 0; fi
         EGRESS_DETAIL="External HTTPS returned unexpected status $RESPONSE."
         return 2
     else
         STATUS=$?
     fi
-    EGRESS_DETAIL="API external HTTPS failed (exit $STATUS)."
     case "$STATUS" in
-        7|28) return 1 ;;
-        *) EGRESS_DETAIL+=" Check SSH, tools, public DNS, TLS, and the external endpoint."; return 2 ;;
+        7) EGRESS_DETAIL="The API server cannot connect to https://example.com (connection failed)."; return 1 ;;
+        28) EGRESS_DETAIL="The API server cannot connect to https://example.com (connection timed out)."; return 1 ;;
+        *) EGRESS_DETAIL="API external HTTPS check failed (exit $STATUS). Check SSH, tools, public DNS, TLS, and the external endpoint."; return 2 ;;
     esac
 }
 
@@ -104,6 +104,8 @@ check_api_egress() {
         EGRESS_DETAIL="The API must stay private; a public IP is not a Cloud NAT repair."
         return 1
     fi
+    # Live symptom first; config checks below only reject workarounds.
+    probe_api_https || return $?
     if ! MAPPINGS=$(gcloud compute routers get-nat-mapping-info "router-$DEPLOYMENT_ID" \
         --project "$PROJECT_ID" --region "$REGION" --format=json) ||
         ! NAT_IPS=$(jq -er --arg ip "$API_IP" --arg instance "vm-api-$DEPLOYMENT_ID" '
@@ -116,10 +118,9 @@ check_api_egress() {
         return 2
     fi
     if [ -z "$NAT_IPS" ]; then
-        EGRESS_DETAIL="The API interface has no Cloud NAT mapping on the lab router."
+        EGRESS_DETAIL="External HTTPS works, but not through the lab's Cloud NAT."
         return 1
     fi
-    probe_api_https || return $?
     if ! OUTBOUND_IP=$(run_on_vm "$API_IP" \
         'curl -4 --noproxy "*" -fsS --connect-timeout 5 --max-time 10 --retry 2 --retry-all-errors --retry-delay 2 --retry-max-time 35 https://api.ipify.org' 50); then
         EGRESS_DETAIL="Could not obtain the API outbound IP from api.ipify.org."
@@ -135,7 +136,7 @@ check_api_egress() {
 probe_api_health() {
     local SOURCE="$1" TARGET="$2" RESPONSE STATUS
     if RESPONSE=$(run_on_vm "$SOURCE" \
-        "curl --noproxy '*' -fsS --connect-timeout 3 --max-time 5 http://$TARGET:8080/health" 15); then
+        "curl --noproxy '*' -fs --connect-timeout 3 --max-time 5 http://$TARGET:8080/health" 15); then
         if jq -se 'length == 1 and (.[0] | type == "object" and .status == "healthy")' \
             <<< "$RESPONSE" >/dev/null 2>&1; then
             SERVICE_DETAIL="API health on $TARGET:8080 is healthy."
@@ -228,13 +229,11 @@ check_hardening() {
             case "$STATUS" in 7|28) return 1 ;; *) return 2 ;; esac
         fi
     done
-    for TARGET in "$WEB_IP" "$API_IP" "$DB_IP"; do
-        if run_on_vm "$BASTION_IP" "ping -4 -n -c 3 -W 2 $TARGET >/dev/null" 15; then :; else
-            STATUS=$?
-            HARDENING_DETAIL="Required bastion ICMP to $TARGET failed (exit $STATUS)."
-            if [ "$STATUS" -eq 1 ]; then return 1; else return 2; fi
-        fi
-    done
+    if run_on_vm "$BASTION_IP" "ping -4 -n -c 3 -W 2 $WEB_IP >/dev/null" 15; then :; else
+        STATUS=$?
+        HARDENING_DETAIL="Required bastion ICMP to web failed (exit $STATUS)."
+        if [ "$STATUS" -eq 1 ]; then return 1; else return 2; fi
+    fi
     for SOURCE in "$API_IP" "$DB_IP"; do
         if run_on_vm "$SOURCE" "ping -4 -n -c 1 -W 2 $WEB_IP >/dev/null" 10; then
             HARDENING_DETAIL="Unauthorized ICMP from $SOURCE to web still succeeds."

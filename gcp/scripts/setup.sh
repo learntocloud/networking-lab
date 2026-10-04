@@ -163,7 +163,7 @@ for IP in "$BASTION_IP" "$WEB_IP" "$API_IP" "$DB_IP"; do
     fi
     check_vm_tools "$IP"
 done
-run_on_vm "$WEB_IP" 'curl -fsS --max-time 10 http://localhost/health && curl -kfsS --max-time 10 https://localhost/health'
+run_on_vm "$WEB_IP" 'curl -fsS --max-time 10 http://localhost/health && curl -kfsS --max-time 10 https://localhost/health' >/dev/null
 
 STATUS=0
 check_application_paths || STATUS=$?

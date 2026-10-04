@@ -3,8 +3,21 @@
 set -e
 
 # Install Python and tools
-apt-get update
-apt-get install -y \
+# Retry: egress can lag for a minute after first boot (apt-get update alone
+# exits 0 on fetch failures, so the install is what detects it).
+apt_install() {
+  local attempt
+  for attempt in $(seq 1 30); do
+    if apt-get -o DPkg::Lock::Timeout=600 update &&
+      apt-get -o DPkg::Lock::Timeout=600 install -y "$@"; then
+      return 0
+    fi
+    echo "apt attempt $attempt failed; retrying in 10s" >&2
+    sleep 10
+  done
+  return 1
+}
+apt_install \
     python3 \
     python3-flask \
     postgresql-client \

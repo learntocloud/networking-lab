@@ -240,9 +240,7 @@ def assess(args):
         if not contains(required_allowed, required):
             failures.append(f"{label} blocks its required source.")
     if failures:
-        print("Bastion SSH must be restricted to the current client's public IPv4 /32; "
-              "internal SSH, database, and ICMP sources must resolve to the bastion or API only. "
-              + " ".join(failures))
+        print("Security audit still failing: " + " ".join(failures))
         return 1
     print("Effective security-group ingress sources match the policy; bastion SSH is limited to the current client's public IPv4 /32.")
     return 0

@@ -134,7 +134,7 @@ wait_for_vm() {
         sleep 5
     done
     run_on_vm "$IP" '
-        cloud-init status --wait --long
+        cloud-init status --wait >/dev/null
         STATUS=$?
         if [ "$STATUS" -eq 2 ]; then
             echo "Warning: cloud-init reported recoverable errors; checking tools and service health."
@@ -153,7 +153,7 @@ wait_for_vm web "$WEB_IP"
 wait_for_vm API "$API_IP"
 wait_for_vm database "$DB_IP"
 
-run_on_vm "$WEB_IP" 'curl -fsS --max-time 10 http://localhost/health && curl -kfsS --max-time 10 https://localhost/health'
+run_on_vm "$WEB_IP" 'curl -fsS --max-time 10 http://localhost/health && curl -kfsS --max-time 10 https://localhost/health' >/dev/null
 echo "Checking local services and both blocked application paths..."
 if check_application_paths; then
     STATUS=0
@@ -198,7 +198,7 @@ if [ "$FAULT_READY" != true ]; then
     echo "Error: API external HTTPS still works after preparing the incident." >&2
     exit 1
 fi
-run_on_vm "$API_IP" 'getent ahostsv4 example.com >/dev/null && curl -fsS --max-time 10 http://localhost:8080/health | jq -e ".status == \"healthy\""'
+run_on_vm "$API_IP" 'getent ahostsv4 example.com >/dev/null && curl -fsS --max-time 10 http://localhost:8080/health | jq -e ".status == \"healthy\""' >/dev/null
 
 echo "Checking public DNS from every VM..."
 for IP in "$BASTION_IP" "$WEB_IP" "$API_IP" "$DB_IP"; do

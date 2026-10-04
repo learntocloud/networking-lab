@@ -92,7 +92,7 @@ resource "google_compute_firewall" "allow_icmp" {
   priority  = 1000
 
   source_ranges = ["0.0.0.0/0"]
-  target_tags   = ["web", "api", "db"]
+  target_tags   = ["web"]
 
   allow {
     protocol = "icmp"

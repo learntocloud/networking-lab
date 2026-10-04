@@ -277,7 +277,7 @@ def assess(args):
         if failure:
             failures.append(failure)
     if failures:
-        print(f"Trusted bastion SSH source: {trusted}/32. " + " ".join(failures))
+        print("Security audit still failing: " + " ".join(failures))
         return 1
     print(f"Effective inbound source restrictions match the policy; bastion SSH is limited to {trusted}/32.")
     return 0

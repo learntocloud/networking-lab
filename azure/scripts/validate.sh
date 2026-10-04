@@ -20,11 +20,29 @@ CYAN='\033[0;36m'
 NC='\033[0m' # No Color
 
 # Incident tracking
-declare -A INCIDENTS
-INCIDENTS["INC-4521"]="pending"
-INCIDENTS["INC-4522"]="pending"
-INCIDENTS["INC-4523"]="pending"
-INCIDENTS["INC-4524"]="pending"
+# Scalars, not an associative array: macOS ships bash 3.2.
+INC_4521="pending"
+INC_4522="pending"
+INC_4523="pending"
+INC_4524="pending"
+
+set_incident() {
+    case "$1" in
+        INC-4521) INC_4521="$2" ;;
+        INC-4522) INC_4522="$2" ;;
+        INC-4523) INC_4523="$2" ;;
+        INC-4524) INC_4524="$2" ;;
+    esac
+}
+
+incident_state() {
+    case "$1" in
+        INC-4521) echo "$INC_4521" ;;
+        INC-4522) echo "$INC_4522" ;;
+        INC-4523) echo "$INC_4523" ;;
+        INC-4524) echo "$INC_4524" ;;
+    esac
+}
 
 # Master secret for token generation (matches verification service)
 # Using same format as Linux CTF but distinct secret for networking lab
@@ -107,13 +125,13 @@ preflight_check() {
 validate_inc_4521() {
     local STATUS
     if check_api_egress; then
-        INCIDENTS["INC-4521"]="resolved"
+        set_incident INC-4521 resolved
     else
         STATUS=$?
         if [ "$STATUS" -eq 1 ]; then
-            INCIDENTS["INC-4521"]="unresolved"
+            set_incident INC-4521 unresolved
         else
-            INCIDENTS["INC-4521"]="error"
+            set_incident INC-4521 error
             echo "Error: INC-4521: $EGRESS_DETAIL" >&2
         fi
     fi
@@ -123,13 +141,13 @@ validate_inc_4522() {
     local ATTEMPT STATUS
     for ATTEMPT in {1..3}; do
         if validate_private_dns "168.63.129.16" "$BASTION_IP" "$WEB_IP" "$API_IP" "$DB_IP"; then
-            INCIDENTS["INC-4522"]="resolved"
+            set_incident INC-4522 resolved
             return
         else
             STATUS=$?
         fi
         if [ "$STATUS" -ne 1 ]; then
-            INCIDENTS["INC-4522"]="error"
+            set_incident INC-4522 error
             echo "Error: INC-4522: $DNS_DETAIL" >&2
             return
         fi
@@ -137,19 +155,19 @@ validate_inc_4522() {
             sleep 2
         fi
     done
-    INCIDENTS["INC-4522"]="unresolved"
+    set_incident INC-4522 unresolved
 }
 
 validate_inc_4523() {
     local STATUS
     if check_application_paths; then
-        INCIDENTS["INC-4523"]="resolved"
+        set_incident INC-4523 resolved
     else
         STATUS=$?
         if [ "$STATUS" -eq 1 ]; then
-            INCIDENTS["INC-4523"]="unresolved"
+            set_incident INC-4523 unresolved
         else
-            INCIDENTS["INC-4523"]="error"
+            set_incident INC-4523 error
             echo "Error: INC-4523: $PORTS_DETAIL" >&2
         fi
     fi
@@ -158,13 +176,13 @@ validate_inc_4523() {
 validate_inc_4524() {
     local STATUS
     if check_hardening; then
-        INCIDENTS["INC-4524"]="resolved"
+        set_incident INC-4524 resolved
     else
         STATUS=$?
         if [ "$STATUS" -eq 1 ]; then
-            INCIDENTS["INC-4524"]="unresolved"
+            set_incident INC-4524 unresolved
         else
-            INCIDENTS["INC-4524"]="error"
+            set_incident INC-4524 error
             echo "Error: INC-4524: $HARDENING_DETAIL" >&2
         fi
     fi
@@ -213,10 +231,10 @@ show_status() {
     local ERRORS=0
     
     for INC in "INC-4521" "INC-4522" "INC-4523" "INC-4524"; do
-        if [ "${INCIDENTS[$INC]}" == "resolved" ]; then
+        if [ "$(incident_state "$INC")" == "resolved" ]; then
             echo -e "  ${GREEN}✓${NC} $INC"
             RESOLVED=$((RESOLVED + 1))
-        elif [ "${INCIDENTS[$INC]}" == "error" ]; then
+        elif [ "$(incident_state "$INC")" == "error" ]; then
             echo -e "  ${YELLOW}!${NC} $INC (validation error)"
             ERRORS=$((ERRORS + 1))
         else
@@ -260,11 +278,11 @@ export_token() {
     # Check if all resolved
     local RESOLVED=0
     for INC in "INC-4521" "INC-4522" "INC-4523" "INC-4524"; do
-        if [ "${INCIDENTS[$INC]}" == "error" ]; then
+        if [ "$(incident_state "$INC")" == "error" ]; then
             echo "Error: Validation could not complete for $INC; no token generated." >&2
             exit 2
         fi
-        [ "${INCIDENTS[$INC]}" == "resolved" ] && RESOLVED=$((RESOLVED + 1))
+        [ "$(incident_state "$INC")" == "resolved" ] && RESOLVED=$((RESOLVED + 1))
     done
 
     if [ $RESOLVED -ne 4 ]; then

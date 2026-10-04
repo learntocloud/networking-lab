@@ -178,8 +178,7 @@ def assess(args):
         *[(role, "tcp", 22, bastion["subnet"], bastion["ip"], f"{role} SSH")
           for role in ("web", "api", "database")],
         ("database", "tcp", 5432, api["subnet"], api["ip"], "Database TCP 5432"),
-        *[(role, "icmp", None, bastion["subnet"], bastion["ip"], f"{role} ICMP")
-          for role in ("web", "api", "database")],
+        ("web", "icmp", None, bastion["subnet"], bastion["ip"], "web ICMP"),
     ]
     failures = []
     for role, protocol, port, approved, required, label in checks:
@@ -191,7 +190,7 @@ def assess(args):
         if not contains(allowed, required):
             failures.append(f"{label} blocks its required source.")
     if failures:
-        print("Bastion SSH must be restricted to the current client's public IPv4 /32. " + " ".join(failures))
+        print("Security audit still failing: " + " ".join(failures))
         return 1
     print("Effective ingress source restrictions passed; bastion SSH is limited to the current client's public IPv4 /32.")
     return 0

@@ -43,6 +43,20 @@ if [[ ! $REPLY == "yes" ]]; then
     exit 0
 fi
 
+# Learner-created private DNS VNet links block zone deletion (409), and
+# Terraform doesn't track them, so remove them first.
+if [ "$RESOURCE_GROUP" != "unknown" ] && command -v az >/dev/null 2>&1; then
+    for ZONE in $(az network private-dns zone list -g "$RESOURCE_GROUP" \
+        --query "[].name" -o tsv 2>/dev/null || true); do
+        for LINK in $(az network private-dns link vnet list -g "$RESOURCE_GROUP" \
+            -z "$ZONE" --query "[].name" -o tsv 2>/dev/null || true); do
+            echo "Deleting private DNS link: $ZONE/$LINK"
+            az network private-dns link vnet delete -g "$RESOURCE_GROUP" \
+                -z "$ZONE" -n "$LINK" --yes --output none 2>/dev/null || true
+        done
+    done
+fi
+
 # Destroy
 echo "Destroying infrastructure..."
 terraform destroy -auto-approve

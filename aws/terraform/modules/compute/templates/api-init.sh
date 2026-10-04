@@ -22,8 +22,21 @@ chown -R ${admin_username}:${admin_username} /home/${admin_username}/.ssh
 
 # Package installation needs the private subnet's NAT route, which setup.sh
 # removes only after this script has finished (INC-4521).
-apt-get -o DPkg::Lock::Timeout=600 update
-apt-get -o DPkg::Lock::Timeout=600 install -y \
+# Retry: egress can lag for a minute after first boot (apt-get update alone
+# exits 0 on fetch failures, so the install is what detects it).
+apt_install() {
+  local attempt
+  for attempt in $(seq 1 30); do
+    if apt-get -o DPkg::Lock::Timeout=600 update &&
+      apt-get -o DPkg::Lock::Timeout=600 install -y "$@"; then
+      return 0
+    fi
+    echo "apt attempt $attempt failed; retrying in 10s" >&2
+    sleep 10
+  done
+  return 1
+}
+apt_install \
   python3 \
   python3-flask \
   postgresql-client \

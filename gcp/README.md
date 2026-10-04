@@ -25,8 +25,8 @@ flowchart TB
     client -->|"SSH 22"| bastion
     client -->|"HTTP 80 / HTTPS 443"| web
     bastion -->|"SSH 22 / ICMP"| web
-    bastion -->|"SSH 22 / ICMP"| api
-    bastion -->|"SSH 22 / ICMP"| db
+    bastion -->|"SSH 22"| api
+    bastion -->|"SSH 22"| db
     web -->|"TCP 8080"| api
     api -->|"TCP 5432"| db
     private -.-> nat
@@ -36,8 +36,6 @@ flowchart TB
 ```
 
 Intended traffic after repairs. Dashed lines show resource associations.
-Cloud NAT is not a VM in the public subnet; it provides outbound translation
-for covered VM interfaces without external IPs.
 
 ## Contents
 
@@ -78,9 +76,8 @@ for covered VM interfaces without external IPs.
    ./setup.sh
    ```
 
-Wait for **READY TO START** and the SSH connection instructions. Setup waits for
-GCE startup scripts and checks local services before preparing the incidents.
-If it fails, inspect the error and retry, or run `./destroy.sh` to avoid charges.
+Wait for **READY TO START** and the SSH connection instructions. If setup fails,
+resolve the reported error and retry, or run `./destroy.sh` to avoid charges.
 
 **Cost**: ~$0.50-1.00/session. Destroy when done.
 
@@ -90,8 +87,8 @@ If it fails, inspect the error and retry, or run `./destroy.sh` to avoid charges
 
 This lab has **two separate activities**:
 
-- **Diagnose via SSH** — The setup script gives you an SSH command to connect through the bastion host. Use it to hop into VMs and check what's broken (test connectivity, resolve DNS, curl endpoints, etc.).
-- **Fix via gcloud CLI** — Once you know the root cause, open a separate terminal on your **local machine** and fix the misconfigured cloud resources using `gcloud` commands (e.g., fix firewall rules, routes, DNS records).
+- **Diagnose via SSH** — The setup script gives you an SSH command to connect through the bastion host. Use it to hop into VMs and check what's broken.
+- **Fix via gcloud CLI** — Once you know the root cause, open a separate terminal on your **local machine** and fix the misconfigured cloud resources using `gcloud` commands.
 
 Do **not** edit Terraform files to fix issues. Do **not** try to fix things from inside the VMs. The cloud infrastructure is what's broken — fix it with the cloud CLI.
 
@@ -150,9 +147,8 @@ Cloud Router, while remaining private (no external IP).
 **Affected systems:** Bastion, web, API, and database
 
 **Done when:** All three service names resolve exclusively to their correct
-private IPv4 addresses through cloud and system DNS on all four VMs. GCP uses
-the metadata server (`169.254.169.254`) for these DNS queries; private zones
-must authorize the VPC. Hosts-file-only workarounds do not count.
+private IPv4 addresses through cloud and system DNS on all four VMs.
+Hosts-file-only workarounds do not count.
 
 | Run from | Command | Expected result |
 |----------|---------|-----------------|
@@ -180,8 +176,7 @@ Repeat for `api.internal.test` and `db.internal.test`, expecting their respectiv
 | Web | `curl --noproxy '*' -fsS --max-time 5 http://<API_PRIVATE_IP>:8080/health` | JSON with `"status": "healthy"`. |
 | API | `pg_isready -h <DB_PRIVATE_IP> -p 5432 -U labuser -d labdb -t 3` | `accepting connections` |
 
-These checks use private IPs, independently of NAT and DNS repairs. The API's
-`/db-check` endpoint also needs INC-4522.
+These checks use private IPs; the API's `/db-check` endpoint also needs INC-4522.
 
 ---
 
@@ -195,7 +190,7 @@ These checks use private IPs, independently of NAT and DNS repairs. The API's
 > 
 > 1. SSH rules are too broad. Restrict bastion SSH to your current public IPv4 address (`/32`), and web, API, and database SSH to the bastion subnet.
 > 2. Database accepts connections on port 5432 from too broad a range — it should only accept connections from the API subnet (10.0.2.0/24)
-> 3. ICMP is open from anywhere on web, API, and database — it should only be allowed from the bastion subnet.
+> 3. ICMP is open from anywhere on the web server — it should only be allowed from the bastion subnet.
 > 
 > These need to be tightened up before our compliance review next week."
 
@@ -210,38 +205,27 @@ or source network tags are valid if required clients retain access.
 | Your machine | `ssh -i ~/.ssh/netlab-key labadmin@<BASTION_PUBLIC_IP>` | SSH session opens. |
 | Bastion | `ssh labadmin@<VM_PRIVATE_IP>` | SSH works to web, API, and database. |
 | Your machine | `curl --noproxy '*' -kI --max-time 5 http://<WEB_PUBLIC_IP>/health https://<WEB_PUBLIC_IP>/health` | HTTP `200` from both endpoints. |
-| Bastion | `ping -c 3 -W 2 <VM_PRIVATE_IP>` | Echo replies from web, API, and database. |
+| Bastion | `ping -c 3 -W 2 <WEB_PRIVATE_IP>` | Echo replies. |
 | API | `nc -zvw3 <WEB_PRIVATE_IP> 22` | Connection fails or times out. |
 | API | `ping -c 3 -W 2 <WEB_PRIVATE_IP>` | No echo replies. |
 | Bastion | `nc -zvw3 <DB_PRIVATE_IP> 5432` | Connection fails or times out. |
 
 The trusted `/32` is the client address seen by the bastion over SSH. If it
-changes, update the bastion rule with gcloud before validating. Validation
-checks this address without echoing it in status output. Private-only
-VMs are not directly reachable from the internet, but broad rules still expose
-them to unauthorized internal sources.
-
-GCP VPC firewalls have implicit ingress deny, lower numbers mean higher
-priority, and deny wins at equal priority. Source ranges and source tags on
-one rule are combined with **OR**, not AND. Check every applicable rule, not
-just the original rule names. The HTTPS check uses `-k` for the lab's self-signed certificate.
+changes, update the bastion rule with gcloud before validating. The HTTPS check
+uses `-k` because the lab certificate is self-signed.
 
 ---
 
 ## Verify Your Fixes
 
-The commands above are spot checks. The validator checks cloud configuration
-and live traffic, including effective VPC firewall priorities, source ranges,
-network tags, service accounts, and implied ingress deny. It supports the lab's
-single-NIC, primary-IPv4 topology. Hierarchical and network firewall policies
-are reported as validation errors rather than silently ignored; use a project
-without those additional policy layers.
+The commands above are spot checks. Use `./validate.sh` as the final acceptance
+check: it checks cloud configuration and live traffic for the lab's single-NIC
+IPv4 topology. Projects with hierarchical or network firewall policies are not
+supported.
 
-Allow Cloud NAT, DNS, and firewall changes to propagate before retrying;
-control-plane updates can finish before live traffic changes. Cached DNS
-answers can persist until their TTL expires. Validation requires SSH and
-working diagnostic tools on all four VMs. NAT checks depend on `example.com`
-and `api.ipify.org` being available.
+Allow changes to propagate before retrying. Validation requires SSH access and
+working diagnostic tools; NAT checks also use `example.com` and
+`api.ipify.org`.
 
 **Exit codes:** `0` = all resolved, `1` = unresolved incidents, `2` = validation
 error. Completion tokens are available only when all four pass.
@@ -296,4 +280,4 @@ When finished, destroy resources to avoid charges:
    ./destroy.sh
    ```
 
-> **Note:** If `terraform destroy` fails, it's likely because you created resources via gcloud (e.g., firewall rules, DNS records) that Terraform doesn't know about. Delete those resources manually with `gcloud` first, then re-run `./destroy.sh`.
+> **Note:** If `terraform destroy` fails, it's likely because you created resources via gcloud that Terraform doesn't know about. Delete those resources manually with `gcloud` first, then re-run `./destroy.sh`.

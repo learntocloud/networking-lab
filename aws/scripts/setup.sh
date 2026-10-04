@@ -171,7 +171,7 @@ wait_for_vm web "$WEB_IP"
 wait_for_vm API "$API_IP"
 wait_for_vm database "$DB_IP"
 
-run_on_vm "$WEB_IP" 'curl -fsS --max-time 10 http://localhost/health && curl -kfsS --max-time 10 https://localhost/health'
+run_on_vm "$WEB_IP" 'curl -fsS --max-time 10 http://localhost/health && curl -kfsS --max-time 10 https://localhost/health' >/dev/null
 echo "Checking local services and both blocked application paths..."
 STATUS=0
 check_application_paths || STATUS=$?
